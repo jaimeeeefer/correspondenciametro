@@ -1,74 +1,58 @@
-from flask import Flask, request, jsonify, render_template
 import requests
-from bs4 import BeautifulSoup
-import re
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-def obtener_token(station_url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(station_url, headers=headers)
-    if response.status_code != 200:
-        return None
-    html = response.text
-    match = re.search(r"p_p_auth=([A-Za-z0-9]+)", html)
-    if match:
-        return match.group(1)
-    return None
+def obtener_token_y_cookies(url_base):
+    session = requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 ...",
+        "Referer": url_base,
+        "Origin": "https://www.adif.es"
+    }
+    # Hacer GET para obtener cookies y token
+    r = session.get(url_base, headers=headers)
+    if r.status_code != 200:
+        return None, None
 
-@app.route("/")
-def index():
-    return render_template("index.html")
+    # Extraer token (ejemplo, puede variar)
+    # Aquí tendrías que usar regex o parsing HTML para token p_p_auth
+    token = "extraccion_del_token"  
+
+    return session, token
 
 @app.route("/api/horarios")
-def get_horarios():
-    codigo = request.args.get("codigo")
-    if not codigo:
-        return jsonify({"error": "Falta el parámetro 'codigo'"}), 400
+def horarios():
+    codigo = request.args.get("codigo", "")
+    url_base = f"https://www.adif.es/w/{codigo}"
 
-    estacion_url = f"https://www.adif.es/w/{codigo}"
-    token = obtener_token(estacion_url)
-    if not token:
-        return jsonify({"error": "No se pudo obtener el token de autenticación"}), 500
-
-    url = (
-        f"https://www.adif.es/w/{codigo}"
-        "?p_p_id=servicios_estacion_ServiciosEstacionPortlet"
-        "&p_p_lifecycle=2"
-        "&p_p_state=normal"
-        "&p_p_mode=view"
-        "&p_p_resource_id=/consultarHorario"
-        "&p_p_cacheability=cacheLevelPage"
-        f"&assetEntryId=3127062"
-        f"&p_p_auth={token}"
-    )
+    session, token = obtener_token_y_cookies(url_base)
+    if not session or not token:
+        return jsonify({"error": "No se pudo obtener token o cookies"}), 500
 
     data = {
         "_servicios_estacion_ServiciosEstacionPortlet_searchType": "proximasSalidas",
         "_servicios_estacion_ServiciosEstacionPortlet_trafficType": "cercanias",
         "_servicios_estacion_ServiciosEstacionPortlet_numPage": 0,
-        "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": "BILBAO",
+        "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": "BILBAO", # o según estación
         "_servicios_estacion_ServiciosEstacionPortlet_stationCode": codigo,
     }
 
-    headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
-    "Referer": "https://www.adif.es/w/13106-llodio",
-    "Origin": "https://www.adif.es",
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    ...
+    headers_post = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 ...",
+        "Referer": url_base,
+        "Origin": "https://www.adif.es",
     }
 
+    r = session.post(
+        url_base + "?p_p_resource_id=/consultarHorario&p_p_auth=" + token,
+        data=data,
+        headers=headers_post,
+    )
 
-    response = requests.post(url, data=data, headers=headers)
-    if response.status_code == 200:
-        try:
-            result = response.json()
-            return jsonify(result)
-        except Exception:
-            return jsonify({"error": "No se pudo decodificar la respuesta de ADIF"}), 500
-    else:
-        return jsonify({"error": f"Error al consultar ADIF: {response.status_code}"}), 500
+    if r.status_code != 200:
+        return jsonify({"error": f"Error externo: {r.status_code}"}), r.status_code
 
-if __name__ == "__main__":
-    app.run(debug=True)
+    return jsonify(r.json())
+
