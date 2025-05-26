@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Horarios ADIF</title>
+</head>
+<body>
+  <h1>Consultar horarios de tren</h1>
+  <input type="text" id="codigo" placeholder="Código de estación (Ej: 13106)">
+  <button onclick="buscarHorarios()">Buscar</button>
+  <ul id="resultados"></ul>
+
+  <script>
+    async function buscarHorarios() {
+      const codigo = document.getElementById("codigo").value;
+      const res = await fetch(`/api/horarios?codigo=${codigo}`);
+      const data = await res.json();
+
+      const lista = document.getElementById("resultados");
+      lista.innerHTML = "";
+
+      if (data.horarios) {
+        data.horarios.forEach(horario => {
+          const item = document.createElement("li");
+          item.textContent = `${horario.hora} - ${horario.estacion} - Tren ${horario.tren}`;
+          lista.appendChild(item);
+        });
+      } else if (data.error) {
+        lista.innerHTML = `<li>Error: ${data.error}</li>`;
+      } else {
+        lista.innerHTML = `<li>No hay horarios disponibles.</li>`;
+      }
+    }
+  </script>
+</body>
+</html>
