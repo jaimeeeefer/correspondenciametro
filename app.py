@@ -1,17 +1,17 @@
 import os
 import requests
+import re
 from flask import Flask, request, jsonify
-from bs4 import BeautifulSoup # Necesario para parsear HTML si aún se usa para algo más
-import urllib.parse as urlparse # Necesario si parse_qs se usa para algo
-from urllib.parse import parse_qs # Necesario si se usa para algo
-import re # ¡Necesario para la expresión regular de obtención de token!
 from json import JSONDecodeError
+import logging # Importar el módulo de logging
 
 app = Flask(__name__)
 
-# Diccionario de mapeo de códigos de estación a nombres para la URL
-# IMPORTANTE: ESTO ES UN EJEMPLO. NECESITAS EXPANDIR ESTA LISTA
-# CON LAS ESTACIONES RELEVANTES Y SUS SLUGS (NOMBRES PARA LA URL DE ADIF).
+# Configurar el logging para Flask para que aparezca en los logs de Render
+logging.basicConfig(level=logging.INFO) # Nivel INFO para ver las trazas importantes
+app.logger.setLevel(logging.INFO)
+
+# Diccionario de mapeo de códigos de estación a nombres para la URL de ADIF
 STATION_CODE_TO_NAME = {
     "13106": "llodio",
     "71302": "bilbao-abando-indalecio-prieto",
@@ -19,8 +19,7 @@ STATION_CODE_TO_NAME = {
     "71304": "santurtzi",
     "71305": "muskiz",
     "71306": "gallarta",
-    # Añade más estaciones aquí siguiendo el patrón:
-    # "CODIGO_NUMERICO": "nombre-de-la-estacion-en-la-url",
+    # Añade más estaciones aquí según sea necesario
 }
 
 # Definir el USER_AGENT que ha funcionado previamente
@@ -33,7 +32,7 @@ def obtener_token(session, url):
     Intenta obtener el token p_p_auth de la URL dada.
     Utiliza los headers que han funcionado previamente y una expresión regular.
     """
-    headers_get_token = { # Renombrado para evitar conflicto con headers_get más abajo
+    headers_get_token = {
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -49,13 +48,14 @@ def obtener_token(session, url):
 
     try:
         app.logger.info(f"Intentando obtener token de: {url}")
-        response = session.get(url, headers=headers_get_token, timeout=20) # Añadido timeout
-        response.raise_for_status() # Lanza excepción para códigos de estado HTTP 4xx/5xx
+        response = session.get(url, headers=headers_get_token, timeout=20)
+        response.raise_for_status()
     except requests.exceptions.RequestException as e:
         app.logger.error(f"Error al hacer la petición GET para obtener token: {e}")
         return None
 
-    match = re.search(r'p_p_auth=([a-zA-Z0-9\-_]+)', response.text) # Ajustado regex para incluir - y _
+    # Ajustado regex para incluir '-' y '_' que a veces aparecen en los tokens
+    match = re.search(r'p_p_auth=([a-zA-Z0-9\-_]+)', response.text)
     if match:
         token = match.group(1)
         app.logger.info(f"Token p_p_auth encontrado: {token}")
@@ -80,11 +80,9 @@ def get_horarios_proxy(cod_estacion_input):
     if station_name_for_url:
         cod_estacion_full_slug = f"{cod_estacion_input}-{station_name_for_url}"
         url_base_with_station = f"{base_adif_url}/w/{cod_estacion_full_slug}"
-        app.logger.info(f"Usando URL base de estación: {url_base_with_station}")
+        app.logger.info(f"Usando URL base de estación para GET: {url_base_with_station}")
     else:
-        app.logger.warning(f"No se encontró un nombre de URL para la estación '{cod_estacion_input}' en el mapeo. Intentando con el código tal cual.")
-        url_base_with_station = f"{base_adif_url}/w/{cod_estacion_input}"
-        # Si el mapeo es mandatorio y falla aquí, esto sería un error de input
+        app.logger.warning(f"No se encontró un nombre de URL para la estación '{cod_estacion_input}' en el mapeo. Fallando.")
         return {"error": True, "message": f"Código de estación '{cod_estacion_input}' no reconocido o sin nombre asociado para la URL de ADIF."}
 
     with requests.Session() as session:
@@ -96,7 +94,6 @@ def get_horarios_proxy(cod_estacion_input):
             return {"error": True, "message": "Fallo al obtener el token de autenticación (p_p_auth) de la página de ADIF."}
 
         # Paso 2: Construir la URL completa para la petición POST
-        # Basado exactamente en tu ejemplo de cómo se construye la URL POST
         url_post = (
             url_base_with_station +
             "?p_p_id=servicios_estacion_ServiciosEstacionPortlet"
@@ -105,8 +102,8 @@ def get_horarios_proxy(cod_estacion_input):
             "&p_p_mode=view"
             "&p_p_resource_id=%2FconsultarHorario"
             "&p_p_cacheability=cacheLevelPage"
-            f"&assetEntryId=3127062" # Asumimos que es fijo, basado en tu ejemplo
-            f"&p_p_auth={auth_token}" # ¡Aquí usamos el token dinámico obtenido!
+            f"&assetEntryId=3127062" # Asumimos que es fijo
+            f"&p_p_auth={auth_token}" # Usamos el token dinámico obtenido
         )
 
         form_data = {
@@ -114,12 +111,12 @@ def get_horarios_proxy(cod_estacion_input):
             "_servicios_estacion_ServiciosEstacionPortlet_trafficType": "cercanias",
             "_servicios_estacion_ServiciosEstacionPortlet_numPage": "0",
             "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": "BILBAO", # Ajusta si necesitas que sea dinámico
-            "_servicios_estacion_ServiciosEstacionPortlet_stationCode": cod_estacion_input # Usar el código numérico original
+            "_servicios_estacion_ServiciosEstacionPortlet_stationCode": cod_estacion_input
         }
 
         headers_post = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": USER_AGENT, # Usar el mismo User-Agent consistente
+            "User-Agent": USER_AGENT,
             "Referer": url_base_with_station, # El Referer debe ser la URL de la página de la estación
             "Origin": base_adif_url,
             "X-Requested-With": "XMLHttpRequest",
