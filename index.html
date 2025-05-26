@@ -2,33 +2,72 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Horarios ADIF</title>
+    <title>Horarios ADIF (Independiente)</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        input { padding: 8px; margin-right: 5px; }
+        button { padding: 8px; }
+        ul { list-style-type: none; padding: 0; }
+        li { background-color: #f4f4f4; border: 1px solid #ddd; margin-bottom: 5px; padding: 10px; }
+        .error { color: red; }
+    </style>
 </head>
 <body>
-    <h1>Consulta de horarios de trenes</h1>
+    <h1>Consulta de horarios de trenes (Independiente)</h1>
     <input id="codigo" placeholder="Introduce el código de estación">
     <button onclick="buscar()">Buscar</button>
+    <div id="status"></div>
     <ul id="resultado"></ul>
 
     <script>
         async function buscar() {
             const codigo = document.getElementById("codigo").value;
-            const res = await fetch(`https://adif.onrender.com/api/horarios?codigo=${codigo}`);
+            const resultado = document.getElementById("resultado");
+            const status = document.getElementById("status");
 
-            const data = await res.json();
-            const ul = document.getElementById("resultado");
-            ul.innerHTML = "";
-            if (data.horarios) {
+            resultado.innerHTML = "";
+            status.innerHTML = "Buscando...";
+
+            // IMPORTANTE: Si este HTML no se sirve desde el mismo dominio que tu API en Render,
+            // necesitarás poner la URL completa, ej:
+            // const apiUrl = `https://tu-servicio-adif.onrender.com/api/horarios/${codigo}`;
+            // Si se sirve desde el mismo dominio (ej. como un static site en Render que llama a tu web service):
+            const apiUrl = `/api/horarios/${codigo}`; // Ruta relativa, formato path parameter
+
+            try {
+                const res = await fetch(apiUrl);
+                 if (!res.ok) {
+                    const errorData = await res.json().catch(() => ({ message: `Error HTTP: ${res.status}` }));
+                    throw new Error(errorData.message || `Error ${res.status} al contactar la API.`);
+                }
+                const data = await res.json();
+                
+                status.innerHTML = ""; // Limpiar estado
+
+                if (data.error) {
+                    resultado.innerHTML = `<li class="error">Error: ${data.message || "desconocido"}${data.details ? '<br><small>Detalles: ' + data.details.substring(0,200) + '</small>' : ''}</li>`;
+                    return;
+                }
+                if (data.respuestaProcesada === false && data.mensaje) {
+                     resultado.innerHTML = `<li class="error">Mensaje de ADIF: ${data.mensaje}</li>`;
+                     return;
+                }
+                if (!data.horarios || data.horarios.length === 0) {
+                    resultado.innerHTML = `<li>No hay horarios disponibles o error.</li>`;
+                    return;
+                }
                 data.horarios.forEach(h => {
                     const li = document.createElement("li");
-                    li.textContent = `${h.hora} - ${h.estacion} - Tren ${h.tren}`;
-                    ul.appendChild(li);
+                    // Ajusta según los campos reales que devuelve tu API/ADIF
+                    li.textContent = `${h.horaSalida ? h.horaSalida : (h.horaLlegada ? h.horaLlegada : h.hora) } - ${h.estacion} - Tren ${h.cdgoTren || h.tren}`;
+                    resultado.appendChild(li);
                 });
-            } else {
-                ul.innerHTML = `<li>No hay horarios disponibles o error: ${data.error || "desconocido"}</li>`;
+            } catch (error) {
+                status.innerHTML = ""; // Limpiar estado
+                resultado.innerHTML = `<li class="error">Fallo al obtener horarios: ${error.message}</li>`;
+                console.error("Error en fetch:", error);
             }
         }
     </script>
 </body>
 </html>
-
