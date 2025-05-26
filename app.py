@@ -25,7 +25,8 @@ STATION_CODE_TO_NAME = {
 # Si has observado un token que parece repetirse por un tiempo, puedes ponerlo aquí.
 # De lo contrario, este es solo un valor de ejemplo.
 # Los tokens reales son dinámicos y deberían ser extraídos.
-FIXED_AUTH_TOKEN = "6O7tIjAO" # Reemplaza si tienes uno que creas fijo
+# --- APLICAMOS .strip() PARA EVITAR ESPACIOS/SALTOS DE LÍNEA ---
+FIXED_AUTH_TOKEN = "6O7tIjAO".strip() # <--- APLICADO .strip() AQUÍ
 # --- FIN ADVERTENCIA ---
 
 # Definir el USER_AGENT
@@ -45,7 +46,8 @@ def get_horarios_proxy(cod_estacion_input):
 
     if station_name_for_url:
         cod_estacion_full_slug = f"{cod_estacion_input}-{station_name_for_url}"
-        url_base_with_station = f"{base_adif_url}/w/{cod_estacion_full_slug}"
+        # --- APLICAMOS .strip() AQUÍ TAMBIÉN POR SI ACASO ---
+        url_base_with_station = f"{base_adif_url}/w/{cod_estacion_full_slug}".strip()
         app.logger.info(f"Usando URL base de estación: {url_base_with_station}")
     else:
         app.logger.warning(f"No se encontró un nombre de URL para la estación '{cod_estacion_input}' en el mapeo. Fallando.")
@@ -53,6 +55,8 @@ def get_horarios_proxy(cod_estacion_input):
 
     # --- Construir la URL completa para la petición POST ---
     # Se utiliza el token fijo definido globalmente
+    # Nota: Los strings en Python se concatenan automáticamente si están uno al lado del otro
+    # dentro de paréntesis, como en el código original.
     url_post = (
         url_base_with_station +
         "?p_p_id=servicios_estacion_ServiciosEstacionPortlet"
@@ -89,7 +93,7 @@ def get_horarios_proxy(cod_estacion_input):
     }
     
     with requests.Session() as session:
-        app.logger.info(f"Realizando petición POST directa a ADIF. URL: {url_post}")
+        app.logger.info(f"Realizando petición POST directa a ADIF. URL: {url_post}") # <-- Verifica esta URL en los logs
         try:
             response = session.post(url_post, data=form_data, headers=headers_post, timeout=20)
             response.raise_for_status()
@@ -127,7 +131,6 @@ def api_horarios(cod_estacion):
             status_code = 502
         elif "no reconocido o sin nombre asociado" in result.get("message", ""):
             status_code = 400
-        # No hay un error específico de "Fallo al obtener el token" aquí, ya que se asume fijo.
         return jsonify(result), status_code
     return jsonify(result)
 
