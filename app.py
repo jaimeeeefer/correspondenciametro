@@ -52,11 +52,13 @@ def get_horarios():
     }
 
     headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0",
-        "Referer": estacion_url,
-        "Origin": "https://www.adif.es"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
+    "Referer": "https://www.adif.es/w/13106-llodio",
+    "Origin": "https://www.adif.es",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    ...
     }
+
 
     response = requests.post(url, data=data, headers=headers)
     if response.status_code == 200:
