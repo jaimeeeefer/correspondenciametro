@@ -1,95 +1,81 @@
-from flask import Flask, request, jsonify
+import os
 import requests
-from bs4 import BeautifulSoup
+from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
 
-def obtener_token_y_sesion(url_base):
-    session = requests.Session()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Referer": url_base,
-        "Origin": "https://www.adif.es"
-    }
-    r = session.get(url_base, headers=headers)
-    if r.status_code != 200:
-        print("Error al obtener página base:", r.status_code)
-        return None, None
-
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    # Buscar token p_p_auth en inputs ocultos
-    token = None
-    for inp in soup.find_all("input", {"name": "p_p_auth"}):
-        token = inp.get("value")
-        if token:
-            break
-
-    # Si no está en inputs, buscar en enlaces
-    if not token:
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if "p_p_auth=" in href:
-                import urllib.parse as up
-                qs = up.urlparse(href).query
-                params = up.parse_qs(qs)
-                if "p_p_auth" in params:
-                    token = params["p_p_auth"][0]
-                    break
-
-    if not token:
-        print("No se encontró token p_p_auth en la página.")
-        return None, None
-
-    return session, token
-
-@app.route('/horarios')
-def horarios():
-    codigo_estacion = request.args.get('codigo')
-    if not codigo_estacion:
-        return jsonify({"error": "Falta parámetro 'codigo'"}), 400
-
-    url_base = f"https://www.adif.es/w/{codigo_estacion}"
-    session, token = obtener_token_y_sesion(url_base)
-    if not token or not session:
-        return jsonify({"error": "No se pudo obtener token o sesión"}), 500
-
-    url_post = (
-        f"https://www.adif.es/w/{codigo_estacion}"
-        "?p_p_id=servicios_estacion_ServiciosEstacionPortlet"
-        "&p_p_lifecycle=2"
-        "&p_p_state=normal"
-        "&p_p_mode=view"
-        "&p_p_resource_id=/consultarHorario"
-        "&p_p_cacheability=cacheLevelPage"
-        f"&p_p_auth={token}"
-    )
+# Función para obtener horarios (proxy a ADIF)
+def get_horarios_proxy(cod_estacion):
+    # Ejemplo muy básico, ajusta según tu código real y token
+    url = f"https://www.adif.es/w/{cod_estacion}?p_p_id=servicios_estacion_ServiciosEstacionPortlet&p_p_lifecycle=2&p_p_state=normal&p_p_mode=view&p_p_resource_id=/consultarHorario&p_p_cacheability=cacheLevelPage&assetEntryId=3127062&p_p_auth=TU_TOKEN_AQUI"
 
     data = {
         "_servicios_estacion_ServiciosEstacionPortlet_searchType": "proximasSalidas",
         "_servicios_estacion_ServiciosEstacionPortlet_trafficType": "cercanias",
         "_servicios_estacion_ServiciosEstacionPortlet_numPage": 0,
-        "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": "BILBAO",  # Aquí podrías mejorar para no hardcodear
-        "_servicios_estacion_ServiciosEstacionPortlet_stationCode": codigo_estacion
+        "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": "BILBAO",
+        "_servicios_estacion_ServiciosEstacionPortlet_stationCode": cod_estacion
     }
 
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Referer": url_base,
+        "User-Agent": "Mozilla/5.0",
+        "Referer": f"https://www.adif.es/w/{cod_estacion}",
         "Origin": "https://www.adif.es"
     }
 
-    resp = session.post(url_post, data=data, headers=headers)
-    if resp.status_code != 200:
-        return jsonify({"error": f"Error al consultar horarios: {resp.status_code}"}), resp.status_code
+    response = requests.post(url, data=data, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return {"error": True, "message": f"HTTP {response.status_code}"}
 
-    try:
-        result = resp.json()
-    except Exception:
-        return jsonify({"error": "La respuesta no es JSON válida"}), 500
-
+# Ruta para consultar horarios via API proxy
+@app.route("/api/horarios/<cod_estacion>")
+def api_horarios(cod_estacion):
+    result = get_horarios_proxy(cod_estacion)
     return jsonify(result)
+
+# Página simple para buscar horarios
+@app.route("/")
+def index():
+    return render_template_string("""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Consulta horarios ADIF</title>
+</head>
+<body>
+    <h1>Consulta horarios de trenes ADIF</h1>
+    <form id="searchForm">
+        Código estación: <input type="text" id="stationCode" required>
+        <button type="submit">Buscar</button>
+    </form>
+    <ul id="results"></ul>
+    <script>
+        document.getElementById('searchForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const code = document.getElementById('stationCode').value;
+            const res = await fetch(`/api/horarios/${code}`);
+            const data = await res.json();
+            const results = document.getElementById('results');
+            results.innerHTML = '';
+            if(data.error) {
+                results.innerHTML = `<li>Error: ${data.message || 'No hay datos'}</li>`;
+                return;
+            }
+            if(!data.horarios || data.horarios.length === 0) {
+                results.innerHTML = '<li>No hay horarios disponibles.</li>';
+                return;
+            }
+            data.horarios.forEach(h => {
+                results.innerHTML += `<li>${h.hora} - ${h.estacion} - Tren: ${h.tren}</li>`;
+            });
+        });
+    </script>
+</body>
+</html>
+""")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
