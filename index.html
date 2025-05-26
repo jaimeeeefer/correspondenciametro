@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Consulta Horarios ADIF</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; }
+    input, button { padding: 8px; font-size: 1rem; }
+    ul { list-style-type: none; padding-left: 0; }
+    li { margin: 6px 0; padding: 8px; background: #f0f0f0; border-radius: 4px; }
+    .error { color: red; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <h1>Consulta Horarios ADIF</h1>
+
+  <label for="codigo">Código de estación:</label>
+  <input type="text" id="codigo" placeholder="Ej: 13106" />
+  <button id="buscarBtn">Buscar horarios</button>
+
+  <p id="mensaje" class="error"></p>
+
+  <ul id="listaHorarios"></ul>
+
+  <script>
+    const buscarBtn = document.getElementById('buscarBtn');
+    const codigoInput = document.getElementById('codigo');
+    const listaHorarios = document.getElementById('listaHorarios');
+    const mensaje = document.getElementById('mensaje');
+
+    buscarBtn.addEventListener('click', () => {
+      const codigo = codigoInput.value.trim();
+      mensaje.textContent = '';
+      listaHorarios.innerHTML = '';
+
+      if (!codigo) {
+        mensaje.textContent = 'Por favor, introduce un código de estación.';
+        return;
+      }
+
+      fetch(`/api/horarios?codigo=${encodeURIComponent(codigo)}`)
+        .then(res => {
+          if (!res.ok) throw new Error(`Error en la petición: ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          if (data.error) {
+            mensaje.textContent = data.error;
+            return;
+          }
+          if (!data.horarios || data.horarios.length === 0) {
+            mensaje.textContent = 'No hay horarios disponibles para esta estación.';
+            return;
+          }
+
+          data.horarios.forEach(h => {
+            const li = document.createElement('li');
+            li.textContent = `${h.hora} - ${h.estacion} - Tren: ${h.tren} - Vía: ${h.via}`;
+            listaHorarios.appendChild(li);
+          });
+        })
+        .catch(err => {
+          mensaje.textContent = `Error: ${err.message}`;
+        });
+    });
+  </script>
+
+</body>
+</html>
