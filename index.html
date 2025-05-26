@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Horarios ADIF (Independiente)</title>
+    <title>Horarios ADIF (Desde Navegador)</title>
     <style>
         body { font-family: sans-serif; margin: 20px; }
         input { padding: 8px; margin-right: 5px; }
@@ -10,16 +10,32 @@
         ul { list-style-type: none; padding: 0; }
         li { background-color: #f4f4f4; border: 1px solid #ddd; margin-bottom: 5px; padding: 10px; }
         .error { color: red; }
+        #status { margin-top: 10px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>Consulta de horarios de trenes (Independiente)</h1>
-    <input id="codigo" placeholder="Introduce el código de estación">
+    <h1>Consulta de horarios de trenes (ADIF desde Navegador)</h1>
+    <input id="codigo" placeholder="Introduce el código de estación (ej. 13106)" value="13106">
     <button onclick="buscar()">Buscar</button>
     <div id="status"></div>
     <ul id="resultado"></ul>
 
     <script>
+        const STATION_CODE_TO_NAME = {
+            "13106": "llodio",
+            "71302": "bilbao-abando-indalecio-prieto",
+            "71301": "barakaldo",
+            "71304": "santurtzi",
+            "71305": "muskiz",
+            "71306": "gallarta",
+            // Añade más estaciones aquí siguiendo el patrón:
+            // "CODIGO_NUMERICO": "nombre-de-la-estacion-en-la-url",
+        };
+
+        const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+        const ASSET_ENTRY_ID = "3127062"; // Asumimos que es fijo, basado en tu ejemplo
+        const COMMUTER_NETWORK = "BILBAO"; // O hacer esto dinámico si es necesario
+
         async function buscar() {
             const codigo = document.getElementById("codigo").value;
             const resultado = document.getElementById("resultado");
@@ -28,18 +44,118 @@
             resultado.innerHTML = "";
             status.innerHTML = "Buscando...";
 
-            // Esta URL apunta a tu propio backend (app.py)
-            // Tu app.py se encargará de transformar 'codigo' a 'codigo-nombre' para la petición a ADIF
-            const apiUrl = `/api/horarios/${codigo}`; 
+            if (!codigo) {
+                status.innerHTML = "Por favor, introduce un código de estación.";
+                return;
+            }
 
+            const baseAdifUrl = "https://www.adif.es";
+            let stationNameForUrl = STATION_CODE_TO_NAME[codigo];
+            let urlBaseWithStation;
+
+            if (stationNameForUrl) {
+                urlBaseWithStation = `${baseAdifUrl}/w/${codigo}-${stationNameForUrl}`;
+            } else {
+                status.innerHTML = `<span class="error">Código de estación '${codigo}' no reconocido.</span>`;
+                console.error(`Código de estación '${codigo}' no reconocido.`);
+                return;
+            }
+
+            let token = null;
+
+            // --- Paso 1: Obtener el token de la página de la estación (GET) ---
+            status.innerHTML = "Obteniendo token de autenticación...";
             try {
-                const res = await fetch(apiUrl);
-                 if (!res.ok) {
-                    const errorData = await res.json().catch(() => ({ message: `Error HTTP: ${res.status}` }));
-                    throw new Error(errorData.message || `Error ${res.status} al contactar la API.`);
+                // NOTA IMPORTANTE: Esta petición GET a adif.es PROBABLEMENTE FALLARÁ POR CORS.
+                // Si falla, verás un error en la consola del navegador.
+                const responseGet = await fetch(urlBaseWithStation, {
+                    method: 'GET',
+                    headers: {
+                        "User-Agent": USER_AGENT,
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                        "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+                        "Accept-Encoding": "gzip, deflate, br", // El navegador lo gestiona automáticamente
+                        "Connection": "keep-alive", // El navegador lo gestiona automáticamente
+                        "Upgrade-Insecure-Requests": "1",
+                        "Sec-Fetch-Dest": "document",
+                        "Sec-Fetch-Mode": "navigate",
+                        "Sec-Fetch-Site": "none",
+                        "Sec-Fetch-User": "?1",
+                        "TE": "trailers" // Encabezado de codificación de transferencia, puede que no sea necesario
+                    },
+                    // 'mode: "no-cors"' evitaría el error CORS, pero te daría una respuesta opaca
+                    // que no podrías leer (response.text() fallaría), por lo que no es útil aquí.
+                    // Necesitamos leer el contenido para extraer el token.
+                });
+
+                if (!responseGet.ok) {
+                    throw new Error(`Error HTTP al obtener el token: ${responseGet.status} ${responseGet.statusText}`);
                 }
-                const data = await res.json();
-                
+
+                const htmlText = await responseGet.text();
+                // Buscar el token con una expresión regular (como en Python)
+                const match = htmlText.match(/p_p_auth=([a-zA-Z0-9\-_]+)/);
+                if (match && match[1]) {
+                    token = match[1];
+                    status.innerHTML = `Token obtenido: ${token.substring(0, 5)}...`; // Mostrar parcial por seguridad
+                    console.log("Token p_p_auth encontrado:", token);
+                } else {
+                    throw new Error("No se encontró el token p_p_auth en la página.");
+                }
+
+            } catch (error) {
+                status.innerHTML = `<span class="error">Error al obtener el token: ${error.message}</span>`;
+                resultado.innerHTML = `<li class="error">Por favor, revisa la consola del navegador (F12) para ver errores de CORS o de red.</li>`;
+                console.error("Error al obtener token:", error);
+                return;
+            }
+
+            // --- Paso 2: Realizar la petición POST a la API de ADIF ---
+            status.innerHTML = "Obteniendo horarios...";
+            try {
+                const urlPost = `${urlBaseWithStation}` +
+                                `?p_p_id=servicios_estacion_ServiciosEstacionPortlet` +
+                                `&p_p_lifecycle=2` +
+                                `&p_p_state=normal` +
+                                `&p_p_mode=view` +
+                                `&p_p_resource_id=%2FconsultarHorario` +
+                                `&p_p_cacheability=cacheLevelPage` +
+                                `&assetEntryId=${ASSET_ENTRY_ID}` +
+                                `&p_p_auth=${token}`;
+
+                const formData = new URLSearchParams();
+                formData.append("_servicios_estacion_ServiciosEstacionPortlet_searchType", "proximasSalidas");
+                formData.append("_servicios_estacion_ServiciosEstacionPortlet_trafficType", "cercanias");
+                formData.append("_servicios_estacion_ServiciosEstacionPortlet_numPage", "0");
+                formData.append("_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork", COMMUTER_NETWORK);
+                formData.append("_servicios_estacion_ServiciosEstacionPortlet_stationCode", codigo);
+
+                // NOTA IMPORTANTE: Esta petición POST a adif.es también PROBABLEMENTE FALLARÁ POR CORS.
+                const responsePost = await fetch(urlPost, {
+                    method: 'POST',
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "User-Agent": USER_AGENT,
+                        "Referer": urlBaseWithStation, // Debe ser la URL de la página de la estación
+                        "Origin": baseAdifUrl,
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Accept": "application/json, text/javascript, */*; q=0.01",
+                        "Accept-Encoding": "gzip, deflate, br",
+                        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+                        "Connection": "keep-alive",
+                        "Sec-Fetch-Dest": "empty",
+                        "Sec-Fetch-Mode": "cors",
+                        "Sec-Fetch-Site": "same-origin",
+                    },
+                    body: formData.toString()
+                });
+
+                if (!responsePost.ok) {
+                    throw new Error(`Error HTTP al obtener horarios: ${responsePost.status} ${responsePost.statusText}`);
+                }
+
+                const data = await responsePost.json();
+
                 status.innerHTML = ""; // Limpiar estado
 
                 if (data.error) {
@@ -60,10 +176,11 @@
                     li.textContent = `${h.horaSalida ? h.horaSalida : (h.horaLlegada ? h.horaLlegada : h.hora) } - ${h.estacion} - Tren ${h.cdgoTren || h.tren}`;
                     resultado.appendChild(li);
                 });
+
             } catch (error) {
                 status.innerHTML = ""; // Limpiar estado
                 resultado.innerHTML = `<li class="error">Fallo al obtener horarios: ${error.message}</li>`;
-                console.error("Error en fetch:", error);
+                console.error("Error en fetch de horarios:", error);
             }
         }
     </script>
