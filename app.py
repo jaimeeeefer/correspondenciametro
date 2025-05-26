@@ -67,34 +67,23 @@ def extract_auth_token_from_html(html_content):
 
 
 def get_horarios_proxy(cod_estacion_input):
-    """
-    Obtiene los horarios de ADIF, construyendo la URL POST con los parámetros
-    y el token extraído de la página inicial de la estación.
-    """
-    base_adif_url = "https://www.adif.es"
-    
-    # --- Construcción de la URL de la página de la estación (para el GET inicial) ---
-    station_name_for_url = STATION_CODE_TO_NAME.get(cod_estacion_input, None)
-
-    if station_name_for_url:
-        cod_estacion_full_slug = f"{cod_estacion_input}-{station_name_for_url}"
-        url_base_with_station = f"{base_adif_url}/w/{cod_estacion_full_slug}"
-        app.logger.info(f"Usando URL base de estación para GET: {url_base_with_station}")
-    else:
-        app.logger.warning(f"No se encontró un nombre de URL para la estación '{cod_estacion_input}' en el mapeo. Intentando con el código tal cual para el GET.")
-        url_base_with_station = f"{base_adif_url}/w/{cod_estacion_input}"
-        # Puedes optar por devolver un error aquí si el mapeo es mandatorio
-        # return {"error": True, "message": f"Código de estación '{cod_estacion_input}' no reconocido o sin nombre asociado para la URL."}
+    # ... (código anterior) ...
 
     headers_get = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.0,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36", # User-Agent de Chrome más reciente
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1"
     }
     
     with requests.Session() as session:
         try:
-            app.logger.info(f"Realizando GET a: {url_base_with_station}")
+            app.logger.info(f"Realizando GET a: {url_base_with_station} con headers mejorados.")
             main_page_response = session.get(url_base_with_station, headers=headers_get, timeout=20)
             main_page_response.raise_for_status()
             app.logger.info("Página de estación obtenida correctamente para extracción de token.")
