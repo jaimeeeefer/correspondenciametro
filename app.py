@@ -2,8 +2,8 @@ import os
 import requests
 from flask import Flask, request, jsonify
 from bs4 import BeautifulSoup
-import urllib.parse as urlparse # Necesario para parse_qs si vamos a extraer el token
-from urllib.parse import parse_qs # Necesario para extraer el token
+import urllib.parse as urlparse
+from urllib.parse import parse_qs
 from json import JSONDecodeError
 
 app = Flask(__name__)
@@ -22,7 +22,7 @@ STATION_CODE_TO_NAME = {
     # "CODIGO_NUMERICO": "nombre-de-la-estacion-en-la-url",
 }
 
-# --- Inicio: Lógica de extracción de token (Revisada) ---
+# --- Inicio: Lógica de extracción de token ---
 def extract_auth_token_from_html(html_content):
     """
     Intenta extraer el token p_p_auth de un input oculto o un enlace en el HTML.
@@ -32,23 +32,12 @@ def extract_auth_token_from_html(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
     app.logger.debug("Buscando token p_p_auth en el HTML...")
 
-    # Opción 1: Buscar en meta tags (menos probable, pero a veces se usa)
-    # meta_tag = soup.find('meta', {'name': 'Liferay-CSRFToken'})
-    # if meta_tag and 'content' in meta_tag.attrs:
-    #     token = meta_tag['content']
-    #     app.logger.debug(f"Token p_p_auth encontrado en meta tag: {token}")
-    #     return token
-
-    # Opción 2: Buscar en inputs ocultos (común en formularios)
-    # Este es el método que solía funcionar para Liferay (el CMS de Adif)
     input_token = soup.find('input', {'type': 'hidden', 'name': 'p_p_auth'})
     if input_token and 'value' in input_token.attrs:
         token = input_token['value']
         app.logger.debug(f"Token p_p_auth encontrado en input oculto: {token}")
         return token
     
-    # Opción 3: Buscar en enlaces (como en el método anterior, pero para cualquier enlace que lo contenga)
-    # Puede que esté en un enlace de javascript o un enlace de paginación/interacción
     for a_tag in soup.find_all('a', href=True):
         href = a_tag['href']
         if 'p_p_auth' in href:
@@ -59,7 +48,6 @@ def extract_auth_token_from_html(html_content):
                 app.logger.debug(f"Token p_p_auth encontrado en enlace: {token}")
                 return token
 
-
     app.logger.warning("No se pudo encontrar el token p_p_auth en el HTML de la página.")
     return None
 
@@ -67,10 +55,31 @@ def extract_auth_token_from_html(html_content):
 
 
 def get_horarios_proxy(cod_estacion_input):
-    # ... (código anterior) ...
+    """
+    Obtiene los horarios de ADIF, construyendo la URL POST con los parámetros
+    y el token extraído de la página inicial de la estación.
+    """
+    base_adif_url = "https://www.adif.es"
+    
+    # --- Definición de url_base_with_station ANTES del if/else ---
+    url_base_with_station = "" # Inicializar con un valor por defecto o vacío
 
+    # --- Construcción de la URL de la página de la estación (para el GET inicial) ---
+    station_name_for_url = STATION_CODE_TO_NAME.get(cod_estacion_input, None)
+
+    if station_name_for_url:
+        cod_estacion_full_slug = f"{cod_estacion_input}-{station_name_for_url}"
+        url_base_with_station = f"{base_adif_url}/w/{cod_estacion_full_slug}"
+        app.logger.info(f"Usando URL base de estación para GET: {url_base_with_station}")
+    else:
+        app.logger.warning(f"No se encontró un nombre de URL para la estación '{cod_estacion_input}' en el mapeo. Intentando con el código tal cual para el GET.")
+        url_base_with_station = f"{base_adif_url}/w/{cod_estacion_input}"
+        # Puedes optar por devolver un error aquí si el mapeo es mandatorio
+        # return {"error": True, "message": f"Código de estación '{cod_estacion_input}' no reconocido o sin nombre asociado para la URL."}
+
+    # --- Headers para la petición GET (mejorados para evitar 403) ---
     headers_get = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36", # User-Agent de Chrome más reciente
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
         "Connection": "keep-alive",
@@ -98,15 +107,14 @@ def get_horarios_proxy(cod_estacion_input):
             app.logger.error("No se pudo extraer el token p_p_auth de la página de ADIF.")
             return {"error": True, "message": "No se pudo extraer el token p_p_auth de la página de ADIF."}
 
-        # --- MODIFICACIÓN CLAVE: Construir la URL completa para la petición POST ---
-        # Basado exactamente en tu ejemplo
+        # --- Construir la URL completa para la petición POST ---
         url_post = (
             url_base_with_station +
             "?p_p_id=servicios_estacion_ServiciosEstacionPortlet"
             "&p_p_lifecycle=2"
             "&p_p_state=normal"
             "&p_p_mode=view"
-            "&p_p_resource_id=%2FconsultarHorario" # El %2F es la codificación URL para /
+            "&p_p_resource_id=%2FconsultarHorario"
             "&p_p_cacheability=cacheLevelPage"
             f"&assetEntryId=3127062" # Asumimos que es fijo, basado en tu ejemplo
             f"&p_p_auth={auth_token}"
@@ -115,14 +123,14 @@ def get_horarios_proxy(cod_estacion_input):
         form_data = {
             "_servicios_estacion_ServiciosEstacionPortlet_searchType": "proximasSalidas",
             "_servicios_estacion_ServiciosEstacionPortlet_trafficType": "cercanias",
-            "_servicios_estacion_ServiciosEstacionPortlet_numPage": "0", # Asegurarse de que es un string si es un campo de formulario
+            "_servicios_estacion_ServiciosEstacionPortlet_numPage": "0", # Asegurarse de que es un string
             "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": "BILBAO", # Ajusta si necesitas que sea dinámico
-            "_servicios_estacion_ServiciosEstacionPortlet_stationCode": cod_estacion_input # Usar el código numérico original aquí
+            "_servicios_estacion_ServiciosEstacionPortlet_stationCode": cod_estacion_input # Usar el código numérico original
         }
 
         headers_post = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Referer": url_base_with_station, # El referer debe ser la URL de la página de la estación (GET)
             "Origin": base_adif_url,
             "X-Requested-With": "XMLHttpRequest"
@@ -130,7 +138,6 @@ def get_horarios_proxy(cod_estacion_input):
         
         app.logger.info(f"Realizando petición POST a ADIF. URL: {url_post}")
         try:
-            # Aquí la clave es que 'url_post' ya contiene todos los parámetros GET
             response = session.post(url_post, data=form_data, headers=headers_post, timeout=20)
             response.raise_for_status()
             
@@ -156,19 +163,17 @@ def get_horarios_proxy(cod_estacion_input):
 @app.route("/api/horarios/<cod_estacion>")
 def api_horarios(cod_estacion):
     app.logger.info(f"Recibida petición API para estación: {cod_estacion}")
-    # Validar o sanear cod_estacion si es necesario
-    if not cod_estacion or not cod_estacion.isalnum(): # Ejemplo básico de validación
+    if not cod_estacion or not cod_estacion.isalnum():
         app.logger.warning(f"Código de estación inválido recibido: {cod_estacion}")
         return jsonify({"error": True, "message": "Código de estación inválido."}), 400
         
     result = get_horarios_proxy(cod_estacion)
-    # Determinar el código de estado HTTP basado en el resultado
     if result.get("error"):
-        status_code = 500 # Error interno del servidor por defecto
+        status_code = 500
         if "Error HTTP de ADIF" in result.get("message", ""):
-            status_code = 502 # Bad Gateway
-        elif "No se pudo extraer" in result.get("message", ""): # Generalizado para token/URL
-            status_code = 503 # Service Unavailable
+            status_code = 502
+        elif "No se pudo extraer" in result.get("message", ""):
+            status_code = 503
         return jsonify(result), status_code
     return jsonify(result)
 
