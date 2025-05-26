@@ -78,7 +78,7 @@ def get_horarios_proxy(cod_estacion_input):
         # return {"error": True, "message": f"Código de estación '{cod_estacion_input}' no reconocido o sin nombre asociado para la URL."}
 
     # --- Headers para la petición GET (mejorados para evitar 403) ---
-    headers = {
+    headers_get = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:115.0) Gecko/20100101 Firefox/115.0",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
