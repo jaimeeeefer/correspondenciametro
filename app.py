@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import os
 import requests
 import re
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
@@ -14,11 +15,36 @@ def obtener_token_y_sesion(url_base):
     }
     r = session.get(url_base, headers=headers)
     if r.status_code != 200:
+        print("Error al obtener página base:", r.status_code)
         return None, None
 
-    # Extraemos token p_p_auth de la página (puede variar)
-    token_match = re.search(r'p_p_auth=([a-zA-Z0-9]+)', r.text)
-    token = token_match.group(1) if token_match else None
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # Buscar token p_p_auth en inputs ocultos
+    token = None
+    for inp in soup.find_all("input", {"name": "p_p_auth"}):
+        token = inp.get("value")
+        if token:
+            break
+
+    # Si no está en inputs, buscar en enlaces o scripts (opcional)
+    if not token:
+        # Buscar en enlaces
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "p_p_auth=" in href:
+                # extraer token del href
+                import urllib.parse as up
+                qs = up.urlparse(href).query
+                params = up.parse_qs(qs)
+                if "p_p_auth" in params:
+                    token = params["p_p_auth"][0]
+                    break
+
+    if not token:
+        print("No se encontró token p_p_auth en la página.")
+        return None, None
+
     return session, token
 
 @app.route("/api/horarios")
