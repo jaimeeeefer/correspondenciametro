@@ -28,11 +28,9 @@
             resultado.innerHTML = "";
             status.innerHTML = "Buscando...";
 
-            // IMPORTANTE: Si este HTML no se sirve desde el mismo dominio que tu API en Render,
-            // necesitarás poner la URL completa, ej:
-            // const apiUrl = `https://tu-servicio-adif.onrender.com/api/horarios/${codigo}`;
-            // Si se sirve desde el mismo dominio (ej. como un static site en Render que llama a tu web service):
-            const apiUrl = `/api/horarios/${codigo}`; // Ruta relativa, formato path parameter
+            // Esta URL apunta a tu propio backend (app.py)
+            // Tu app.py se encargará de transformar 'codigo' a 'codigo-nombre' para la petición a ADIF
+            const apiUrl = `/api/horarios/${codigo}`; 
 
             try {
                 const res = await fetch(apiUrl);
