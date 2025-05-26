@@ -2,70 +2,78 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Consulta Horarios ADIF</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; }
-    input, button { padding: 8px; font-size: 1rem; }
-    ul { list-style-type: none; padding-left: 0; }
-    li { margin: 6px 0; padding: 8px; background: #f0f0f0; border-radius: 4px; }
-    .error { color: red; margin-top: 10px; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      background-color: #f0f0f0;
+    }
+    h1 {
+      color: #333;
+    }
+    input, button {
+      padding: 10px;
+      margin: 0.5rem 0;
+      font-size: 1rem;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+    }
+    li {
+      background: white;
+      margin-bottom: 0.5rem;
+      padding: 1rem;
+      border-radius: 5px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
   </style>
 </head>
 <body>
-
-  <h1>Consulta Horarios ADIF</h1>
-
-  <label for="codigo">Código de estación:</label>
+  <h1>Consulta de Horarios ADIF</h1>
+  <label for="codigo">Código de estación:</label><br />
   <input type="text" id="codigo" placeholder="Ej: 13106" />
-  <button id="buscarBtn">Buscar horarios</button>
+  <button onclick="buscarHorarios()">Buscar horarios</button>
 
-  <p id="mensaje" class="error"></p>
-
-  <ul id="listaHorarios"></ul>
+  <div id="resultado"></div>
 
   <script>
-    const buscarBtn = document.getElementById('buscarBtn');
-    const codigoInput = document.getElementById('codigo');
-    const listaHorarios = document.getElementById('listaHorarios');
-    const mensaje = document.getElementById('mensaje');
+    async function buscarHorarios() {
+      const codigo = document.getElementById('codigo').value;
+      const resultado = document.getElementById('resultado');
+      resultado.innerHTML = "Cargando...";
 
-    buscarBtn.addEventListener('click', () => {
-      const codigo = codigoInput.value.trim();
-      mensaje.textContent = '';
-      listaHorarios.innerHTML = '';
+      try {
+        const res = await fetch(`https://adif.onrender.com/api/horarios?codigo=${codigo}`);
+        const data = await res.json();
 
-      if (!codigo) {
-        mensaje.textContent = 'Por favor, introduce un código de estación.';
-        return;
+        if (data.error) {
+          resultado.innerHTML = `<p style="color:red;">Error: ${data.error}</p>`;
+          return;
+        }
+
+        const horarios = data.horarios;
+        if (!horarios.length) {
+          resultado.innerHTML = "<p>No hay horarios disponibles.</p>";
+          return;
+        }
+
+        const lista = horarios.map(h => `
+          <li>
+            <strong>Hora:</strong> ${h.hora} <br/>
+            <strong>Estación:</strong> ${h.estacion} <br/>
+            <strong>Tren:</strong> ${h.tren} <br/>
+            <strong>Vía:</strong> ${h.via}
+          </li>
+        `).join('');
+
+        resultado.innerHTML = `<ul>${lista}</ul>`;
+      } catch (err) {
+        resultado.innerHTML = `<p style="color:red;">Error al obtener datos.</p>`;
       }
-
-      fetch(`/api/horarios?codigo=${encodeURIComponent(codigo)}`)
-        .then(res => {
-          if (!res.ok) throw new Error(`Error en la petición: ${res.status}`);
-          return res.json();
-        })
-        .then(data => {
-          if (data.error) {
-            mensaje.textContent = data.error;
-            return;
-          }
-          if (!data.horarios || data.horarios.length === 0) {
-            mensaje.textContent = 'No hay horarios disponibles para esta estación.';
-            return;
-          }
-
-          data.horarios.forEach(h => {
-            const li = document.createElement('li');
-            li.textContent = `${h.hora} - ${h.estacion} - Tren: ${h.tren} - Vía: ${h.via}`;
-            listaHorarios.appendChild(li);
-          });
-        })
-        .catch(err => {
-          mensaje.textContent = `Error: ${err.message}`;
-        });
-    });
+    }
   </script>
-
 </body>
 </html>
