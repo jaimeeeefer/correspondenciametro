@@ -1,7 +1,5 @@
 from flask import Flask, request, jsonify
-import os
 import requests
-import re
 from bs4 import BeautifulSoup
 
 app = Flask(__name__)
@@ -27,13 +25,11 @@ def obtener_token_y_sesion(url_base):
         if token:
             break
 
-    # Si no está en inputs, buscar en enlaces o scripts (opcional)
+    # Si no está en inputs, buscar en enlaces
     if not token:
-        # Buscar en enlaces
         for a in soup.find_all("a", href=True):
             href = a["href"]
             if "p_p_auth=" in href:
-                # extraer token del href
                 import urllib.parse as up
                 qs = up.urlparse(href).query
                 params = up.parse_qs(qs)
@@ -47,42 +43,53 @@ def obtener_token_y_sesion(url_base):
 
     return session, token
 
-@app.route("/api/horarios")
+@app.route('/horarios')
 def horarios():
-    codigo = request.args.get("codigo")
-    if not codigo:
-        return jsonify({"error": "Falta parámetro codigo"}), 400
+    codigo_estacion = request.args.get('codigo')
+    if not codigo_estacion:
+        return jsonify({"error": "Falta parámetro 'codigo'"}), 400
 
-    url_base = f"https://www.adif.es/w/{codigo}"
-
+    url_base = f"https://www.adif.es/w/{codigo_estacion}"
     session, token = obtener_token_y_sesion(url_base)
-    if not session or not token:
+    if not token or not session:
         return jsonify({"error": "No se pudo obtener token o sesión"}), 500
+
+    url_post = (
+        f"https://www.adif.es/w/{codigo_estacion}"
+        "?p_p_id=servicios_estacion_ServiciosEstacionPortlet"
+        "&p_p_lifecycle=2"
+        "&p_p_state=normal"
+        "&p_p_mode=view"
+        "&p_p_resource_id=/consultarHorario"
+        "&p_p_cacheability=cacheLevelPage"
+        f"&p_p_auth={token}"
+    )
 
     data = {
         "_servicios_estacion_ServiciosEstacionPortlet_searchType": "proximasSalidas",
         "_servicios_estacion_ServiciosEstacionPortlet_trafficType": "cercanias",
         "_servicios_estacion_ServiciosEstacionPortlet_numPage": 0,
-        "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": "BILBAO",
-        "_servicios_estacion_ServiciosEstacionPortlet_stationCode": codigo,
+        "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": "BILBAO",  # Aquí podrías mejorar para no hardcodear
+        "_servicios_estacion_ServiciosEstacionPortlet_stationCode": codigo_estacion
     }
 
-    headers_post = {
+    headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Referer": url_base,
-        "Origin": "https://www.adif.es",
+        "Origin": "https://www.adif.es"
     }
 
-    url_post = f"{url_base}?p_p_resource_id=/consultarHorario&p_p_auth={token}"
+    resp = session.post(url_post, data=data, headers=headers)
+    if resp.status_code != 200:
+        return jsonify({"error": f"Error al consultar horarios: {resp.status_code}"}), resp.status_code
 
-    r = session.post(url_post, data=data, headers=headers_post)
+    try:
+        result = resp.json()
+    except Exception:
+        return jsonify({"error": "La respuesta no es JSON válida"}), 500
 
-    if r.status_code != 200:
-        return jsonify({"error": f"Error externo: {r.status_code}"}), r.status_code
+    return jsonify(result)
 
-    return jsonify(r.json())
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
