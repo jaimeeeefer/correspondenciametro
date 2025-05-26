@@ -1,42 +1,38 @@
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
+from flask import Flask, request, jsonify, render_template
 import requests
 from bs4 import BeautifulSoup
 import re
 
-app = Flask(__name__, static_folder="static", static_url_path="")
-CORS(app)
+app = Flask(__name__)
 
-def get_token(station_code):
-    url = f"https://www.adif.es/w/{station_code}"
+def obtener_token(station_url):
     headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(url, headers=headers)
+    response = requests.get(station_url, headers=headers)
     if response.status_code != 200:
-        print("Error al obtener la página:", response.status_code)
         return None
-    soup = BeautifulSoup(response.text, "html.parser")
-    scripts = soup.find_all("script")
-    for script in scripts:
-        if script.string and "p_p_auth" in script.string:
-            match = re.search(r'p_p_auth=([A-Za-z0-9]+)', script.string)
-            if match:
-                return match.group(1)
+    html = response.text
+    match = re.search(r"p_p_auth=([A-Za-z0-9]+)", html)
+    if match:
+        return match.group(1)
     return None
 
-@app.route("/api/horarios", methods=["GET"])
-def horarios():
-    station_code = request.args.get("codigo")
-    commuter_network = request.args.get("red", "BILBAO")  # por defecto "BILBAO"
+@app.route("/")
+def index():
+    return render_template("index.html")
 
-    if not station_code:
-        return jsonify({"error": "Parámetro 'codigo' es obligatorio"}), 400
+@app.route("/api/horarios")
+def get_horarios():
+    codigo = request.args.get("codigo")
+    if not codigo:
+        return jsonify({"error": "Falta el parámetro 'codigo'"}), 400
 
-    token = get_token(station_code)
+    estacion_url = f"https://www.adif.es/w/{codigo}"
+    token = obtener_token(estacion_url)
     if not token:
-        return jsonify({"error": "No se pudo obtener el token de ADIF"}), 500
+        return jsonify({"error": "No se pudo obtener el token de autenticación"}), 500
 
     url = (
-        f"https://www.adif.es/w/{station_code}"
+        f"https://www.adif.es/w/{codigo}"
         "?p_p_id=servicios_estacion_ServiciosEstacionPortlet"
         "&p_p_lifecycle=2"
         "&p_p_state=normal"
@@ -51,31 +47,26 @@ def horarios():
         "_servicios_estacion_ServiciosEstacionPortlet_searchType": "proximasSalidas",
         "_servicios_estacion_ServiciosEstacionPortlet_trafficType": "cercanias",
         "_servicios_estacion_ServiciosEstacionPortlet_numPage": 0,
-        "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": commuter_network,
-        "_servicios_estacion_ServiciosEstacionPortlet_stationCode": station_code,
+        "_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork": "BILBAO",
+        "_servicios_estacion_ServiciosEstacionPortlet_stationCode": codigo,
     }
 
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": "Mozilla/5.0",
-        "Referer": f"https://www.adif.es/w/{station_code}",
-        "Origin": "https://www.adif.es",
+        "Referer": estacion_url,
+        "Origin": "https://www.adif.es"
     }
 
     response = requests.post(url, data=data, headers=headers)
-
     if response.status_code == 200:
         try:
             result = response.json()
+            return jsonify(result)
         except Exception:
-            return jsonify({"error": "Respuesta no es JSON", "respuesta": response.text}), 500
-        return jsonify(result)
+            return jsonify({"error": "No se pudo decodificar la respuesta de ADIF"}), 500
     else:
-        return jsonify({"error": f"Error {response.status_code}", "detalle": response.text}), response.status_code
-
-@app.route("/")
-def index():
-    return send_from_directory(app.static_folder, "index.html")
+        return jsonify({"error": f"Error al consultar ADIF: {response.status_code}"}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(debug=True)
