@@ -1,188 +1,395 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Horarios ADIF (Desde Navegador)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teleindicador Metro Bilbao</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; }
-        input { padding: 8px; margin-right: 5px; }
-        button { padding: 8px; }
-        ul { list-style-type: none; padding: 0; }
-        li { background-color: #f4f4f4; border: 1px solid #ddd; margin-bottom: 5px; padding: 10px; }
-        .error { color: red; }
-        #status { margin-top: 10px; font-weight: bold; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 800px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #d10000; /* Color de Metro Bilbao */
+            text-align: center;
+            margin-bottom: 25px;
+        }
+        .input-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        label {
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"],
+        input[type="number"],
+        select,
+        button {
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #d10000;
+            color: white;
+            cursor: pointer;
+            border: none;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #a00000;
+        }
+        .results-container {
+            background-color: #e9e9e9;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+            min-height: 150px;
+        }
+        .direction-section {
+            margin-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+        }
+        .direction-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        h2 {
+            color: #d10000;
+            font-size: 20px;
+            margin-top: 0;
+            margin-bottom: 15px;
+        }
+        .train-info {
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 1em;
+        }
+        .train-info strong {
+            color: #333;
+        }
+        .train-info span {
+            color: #666;
+        }
+        .no-trains, .error {
+            color: #d10000;
+            font-weight: bold;
+            text-align: center;
+            padding: 10px;
+        }
+        .loading {
+            text-align: center;
+            font-size: 1.2em;
+            color: #d10000;
+        }
     </style>
 </head>
 <body>
-    <h1>Consulta de horarios de trenes (ADIF desde Navegador)</h1>
-    <input id="codigo" placeholder="Introduce el código de estación (ej. 13106)" value="13106">
-    <button onclick="buscar()">Buscar</button>
-    <div id="status"></div>
-    <ul id="resultado"></ul>
+    <div class="container">
+        <h1>Teleindicador Metro Bilbao</h1>
+
+        <div class="input-section">
+            <label for="stopId">ID de Parada:</label>
+            <input type="number" id="stopId" placeholder="Ej: 450" value="450">
+
+            <label for="headsign">Destino (opcional):</label>
+            <input type="text" id="headsign" placeholder="Ej: ETXEBARRI, BASAURI, KABIEZES, PLENTZIA, URBINAGA">
+
+            <button onclick="displayNextTrains()">Mostrar Próximos Trenes</button>
+        </div>
+
+        <div class="results-container" id="dynamicResults">
+            <p class="loading">Cargando datos...</p>
+        </div>
+    </div>
 
     <script>
-        const STATION_CODE_TO_NAME = {
-            "13106": "llodio",
-            "71302": "bilbao-abando-indalecio-prieto",
-            "71301": "barakaldo",
-            "71304": "santurtzi",
-            "71305": "muskiz",
-            "71306": "gallarta",
-            // Añade más estaciones aquí siguiendo el patrón:
-            // "CODIGO_NUMERICO": "nombre-de-la-estacion-en-la-url",
-        };
+        let stopTimesData = [];
+        let calendarData = [];
+        let calendarDatesData = [];
+        let tripsData = [];
 
-        const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
-        const ASSET_ENTRY_ID = "3127062"; // Asumimos que es fijo, basado en tu ejemplo
-        const COMMUTER_NETWORK = "BILBAO"; // O hacer esto dinámico si es necesario
+        const stopTimesUrl = 'https://raw.githubusercontent.com/jaimeeeefer/correspondenciametro/refs/heads/main/parada450.txt';
+        const calendarUrl = 'https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/calendar.txt';
+        const calendarDatesUrl = 'https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/calendar_dates.txt';
+        const tripsUrl = 'https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/trips.txt';
 
-        async function buscar() {
-            const codigo = document.getElementById("codigo").value;
-            const resultado = document.getElementById("resultado");
-            const status = document.getElementById("status");
-
-            resultado.innerHTML = "";
-            status.innerHTML = "Buscando...";
-
-            if (!codigo) {
-                status.innerHTML = "Por favor, introduce un código de estación.";
-                return;
-            }
-
-            const baseAdifUrl = "https://www.adif.es";
-            let stationNameForUrl = STATION_CODE_TO_NAME[codigo];
-            let urlBaseWithStation;
-
-            if (stationNameForUrl) {
-                urlBaseWithStation = `${baseAdifUrl}/w/${codigo}-${stationNameForUrl}`;
-            } else {
-                status.innerHTML = `<span class="error">Código de estación '${codigo}' no reconocido.</span>`;
-                console.error(`Código de estación '${codigo}' no reconocido.`);
-                return;
-            }
-
-            let token = null;
-
-            // --- Paso 1: Obtener el token de la página de la estación (GET) ---
-            status.innerHTML = "Obteniendo token de autenticación...";
+        async function loadData() {
             try {
-                // NOTA IMPORTANTE: Esta petición GET a adif.es PROBABLEMENTE FALLARÁ POR CORS.
-                // Si falla, verás un error en la consola del navegador.
-                const responseGet = await fetch(urlBaseWithStation, {
-                    method: 'GET',
-                    headers: {
-                        "User-Agent": USER_AGENT,
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                        "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
-                        "Accept-Encoding": "gzip, deflate, br", // El navegador lo gestiona automáticamente
-                        "Connection": "keep-alive", // El navegador lo gestiona automáticamente
-                        "Upgrade-Insecure-Requests": "1",
-                        "Sec-Fetch-Dest": "document",
-                        "Sec-Fetch-Mode": "navigate",
-                        "Sec-Fetch-Site": "none",
-                        "Sec-Fetch-User": "?1",
-                        "TE": "trailers" // Encabezado de codificación de transferencia, puede que no sea necesario
-                    },
-                    // 'mode: "no-cors"' evitaría el error CORS, pero te daría una respuesta opaca
-                    // que no podrías leer (response.text() fallaría), por lo que no es útil aquí.
-                    // Necesitamos leer el contenido para extraer el token.
-                });
+                const [stopTimesResponse, calendarResponse, calendarDatesResponse, tripsResponse] = await Promise.all([
+                    fetch(stopTimesUrl),
+                    fetch(calendarUrl),
+                    fetch(calendarDatesUrl),
+                    fetch(tripsUrl)
+                ]);
 
-                if (!responseGet.ok) {
-                    throw new Error(`Error HTTP al obtener el token: ${responseGet.status} ${responseGet.statusText}`);
-                }
+                stopTimesData = parseCSV(await stopTimesResponse.text());
+                calendarData = parseCSV(await calendarResponse.text());
+                calendarDatesData = parseCSV(await calendarDatesResponse.text());
+                tripsData = parseCSV(await tripsResponse.text());
 
-                const htmlText = await responseGet.text();
-                // Buscar el token con una expresión regular (como en Python)
-                const match = htmlText.match(/p_p_auth=([a-zA-Z0-9\-_]+)/);
-                if (match && match[1]) {
-                    token = match[1];
-                    status.innerHTML = `Token obtenido: ${token.substring(0, 5)}...`; // Mostrar parcial por seguridad
-                    console.log("Token p_p_auth encontrado:", token);
-                } else {
-                    throw new Error("No se encontró el token p_p_auth en la página.");
-                }
+                document.getElementById('dynamicResults').innerHTML = '<p style="text-align: center;">Datos cargados. Introduce un ID de parada para comenzar.</p>';
 
             } catch (error) {
-                status.innerHTML = `<span class="error">Error al obtener el token: ${error.message}</span>`;
-                resultado.innerHTML = `<li class="error">Por favor, revisa la consola del navegador (F12) para ver errores de CORS o de red.</li>`;
-                console.error("Error al obtener token:", error);
-                return;
-            }
-
-            // --- Paso 2: Realizar la petición POST a la API de ADIF ---
-            status.innerHTML = "Obteniendo horarios...";
-            try {
-                const urlPost = `${urlBaseWithStation}` +
-                                `?p_p_id=servicios_estacion_ServiciosEstacionPortlet` +
-                                `&p_p_lifecycle=2` +
-                                `&p_p_state=normal` +
-                                `&p_p_mode=view` +
-                                `&p_p_resource_id=%2FconsultarHorario` +
-                                `&p_p_cacheability=cacheLevelPage` +
-                                `&assetEntryId=${ASSET_ENTRY_ID}` +
-                                `&p_p_auth=${token}`;
-
-                const formData = new URLSearchParams();
-                formData.append("_servicios_estacion_ServiciosEstacionPortlet_searchType", "proximasSalidas");
-                formData.append("_servicios_estacion_ServiciosEstacionPortlet_trafficType", "cercanias");
-                formData.append("_servicios_estacion_ServiciosEstacionPortlet_numPage", "0");
-                formData.append("_servicios_estacion_ServiciosEstacionPortlet_commuterNetwork", COMMUTER_NETWORK);
-                formData.append("_servicios_estacion_ServiciosEstacionPortlet_stationCode", codigo);
-
-                // NOTA IMPORTANTE: Esta petición POST a adif.es también PROBABLEMENTE FALLARÁ POR CORS.
-                const responsePost = await fetch(urlPost, {
-                    method: 'POST',
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "User-Agent": USER_AGENT,
-                        "Referer": urlBaseWithStation, // Debe ser la URL de la página de la estación
-                        "Origin": baseAdifUrl,
-                        "X-Requested-With": "XMLHttpRequest",
-                        "Accept": "application/json, text/javascript, */*; q=0.01",
-                        "Accept-Encoding": "gzip, deflate, br",
-                        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-                        "Connection": "keep-alive",
-                        "Sec-Fetch-Dest": "empty",
-                        "Sec-Fetch-Mode": "cors",
-                        "Sec-Fetch-Site": "same-origin",
-                    },
-                    body: formData.toString()
-                });
-
-                if (!responsePost.ok) {
-                    throw new Error(`Error HTTP al obtener horarios: ${responsePost.status} ${responsePost.statusText}`);
-                }
-
-                const data = await responsePost.json();
-
-                status.innerHTML = ""; // Limpiar estado
-
-                if (data.error) {
-                    resultado.innerHTML = `<li class="error">Error: ${data.message || "desconocido"}${data.details ? '<br><small>Detalles: ' + data.details.substring(0,200) + '</small>' : ''}</li>`;
-                    return;
-                }
-                if (data.respuestaProcesada === false && data.mensaje) {
-                     resultado.innerHTML = `<li class="error">Mensaje de ADIF: ${data.mensaje}</li>`;
-                     return;
-                }
-                if (!data.horarios || data.horarios.length === 0) {
-                    resultado.innerHTML = `<li>No hay horarios disponibles o error.</li>`;
-                    return;
-                }
-                data.horarios.forEach(h => {
-                    const li = document.createElement("li");
-                    // Ajusta según los campos reales que devuelve tu API/ADIF
-                    li.textContent = `${h.horaSalida ? h.horaSalida : (h.horaLlegada ? h.horaLlegada : h.hora) } - ${h.estacion} - Tren ${h.cdgoTren || h.tren}`;
-                    resultado.appendChild(li);
-                });
-
-            } catch (error) {
-                status.innerHTML = ""; // Limpiar estado
-                resultado.innerHTML = `<li class="error">Fallo al obtener horarios: ${error.message}</li>`;
-                console.error("Error en fetch de horarios:", error);
+                console.error('Error loading data:', error);
+                document.getElementById('dynamicResults').innerHTML = '<p class="error">Error al cargar los datos. Por favor, inténtalo de nuevo más tarde.</p>';
             }
         }
+
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            const headers = lines[0].split(',');
+            return lines.slice(1).map(line => {
+                const values = line.split(',');
+                const row = {};
+                headers.forEach((header, i) => {
+                    row[header.trim()] = values[i] ? values[i].trim() : '';
+                });
+                return row;
+            });
+        }
+
+        function getDayOfWeek(date) {
+            const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+            return days[date.getDay()];
+        }
+
+        function getServiceIdsForDate(date, calendar, calendarDates) {
+            const yyyymmdd = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
+            const dayOfWeek = getDayOfWeek(date);
+
+            const activeServiceIds = new Set();
+
+            // Services defined in calendar.txt
+            calendar.forEach(service => {
+                if (parseInt(service.start_date) <= yyyymmdd && parseInt(service.end_date) >= yyyymmdd) {
+                    if (service[dayOfWeek] === '1') {
+                        activeServiceIds.add(service.service_id);
+                    }
+                }
+            });
+
+            // Exceptions from calendar_dates.txt
+            calendarDates.forEach(exception => {
+                if (parseInt(exception.date) === yyyymmdd) {
+                    if (exception.exception_type === '1') { // Service added
+                        activeServiceIds.add(exception.service_id);
+                    } else if (exception.exception_type === '2') { // Service removed
+                        activeServiceIds.delete(exception.service_id);
+                    }
+                }
+            });
+            return activeServiceIds;
+        }
+
+        function convertTimeToMinutes(timeStr) {
+            const [hours, minutes, seconds] = timeStr.split(':').map(Number);
+            return hours * 60 + minutes + (seconds / 60);
+        }
+
+        function formatMinutesToHHMM(minutesTotal) {
+            const hours = Math.floor(minutesTotal / 60);
+            const minutes = Math.round(minutesTotal % 60); // Round minutes for display
+            return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        }
+
+        function displayNextTrains() {
+            const stopId = document.getElementById('stopId').value;
+            const desiredHeadsign = document.getElementById('headsign').value.trim().toUpperCase();
+            const dynamicResultsContainer = document.getElementById('dynamicResults');
+            dynamicResultsContainer.innerHTML = ''; // Clear previous results
+
+            if (!stopId) {
+                dynamicResultsContainer.innerHTML = '<p class="error">Por favor, introduce un ID de parada.</p>';
+                return;
+            }
+
+            const now = new Date();
+            const currentDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+
+            const activeServiceIds = getServiceIdsForDate(currentDay, calendarData, calendarDatesData);
+
+            // Group stop times by trip_id to find trips that visit the stop
+            const stopTimesAtStation = stopTimesData.filter(st => st.stop_id === stopId);
+
+            if (stopTimesAtStation.length === 0) {
+                dynamicResultsContainer.innerHTML = '<p class="no-trains">No se encontraron datos para la parada ' + stopId + '.</p>';
+                return;
+            }
+
+            const relevantTrips = tripsData.filter(trip => activeServiceIds.has(trip.service_id));
+
+            const tripIdsWithService = new Set(relevantTrips.map(trip => trip.trip_id));
+
+            // Filter stop times to only include active trips for today's service
+            const filteredStopTimes = stopTimesAtStation.filter(st => tripIdsWithService.has(st.trip_id));
+
+            // Organize results by headsign/direction
+            const resultsByDirection = {};
+
+            filteredStopTimes.forEach(stopTime => {
+                const arrivalTimeInMinutes = convertTimeToMinutes(stopTime.arrival_time);
+                let timeDifference = arrivalTimeInMinutes - currentTimeInMinutes;
+
+                // Handle cases where arrival time is on the next day (e.g., after midnight)
+                if (timeDifference < -12 * 60) { // If a train from yesterday is showing up
+                     timeDifference += 24 * 60; // Add 24 hours to get correct difference
+                } else if (timeDifference < 0 && arrivalTimeInMinutes < 24*60 && currentTimeInMinutes > 20*60) {
+                    // This handles times that wrap around midnight for schedules that span two days
+                    // E.g., a trip starting at 23:00 and arriving at 00:30 the next day.
+                    // If current time is 23:00 and arrival is 00:30, timeDifference would be negative.
+                    // Adding 24 hours makes it positive, representing minutes until next day's arrival.
+                    timeDifference += 24 * 60;
+                }
+
+                if (timeDifference >= 0) { // Only future trains
+                    const trip = tripsData.find(t => t.trip_id === stopTime.trip_id);
+                    if (trip) {
+                        const headsign = stopTime.stop_headsign || trip.trip_headsign || 'Desconocido';
+                        const directionId = trip.direction_id === '0' ? 'Ida' : 'Vuelta'; // Assuming 0 for one direction, 1 for the other
+
+                        if (desiredHeadsign && headsign.toUpperCase() !== desiredHeadsign) {
+                            return; // Skip if headsign doesn't match and a specific headsign is requested
+                        }
+
+                        if (!resultsByDirection[directionId]) {
+                            resultsByDirection[directionId] = {};
+                        }
+                        if (!resultsByDirection[directionId][headsign]) {
+                            resultsByDirection[directionId][headsign] = [];
+                        }
+
+                        resultsByDirection[directionId][headsign].push({
+                            arrivalTime: stopTime.arrival_time,
+                            timeToArrival: timeDifference,
+                            tripId: stopTime.trip_id
+                        });
+                    }
+                }
+            });
+
+            let anyTrainFound = false;
+            const allResults = Object.keys(resultsByDirection);
+
+            if (allResults.length === 0) {
+                dynamicResultsContainer.innerHTML = '<p class="no-trains">No se encontraron trenes próximos para esta parada en la dirección y destino seleccionados.</p>';
+                return;
+            }
+
+            for (const directionId in resultsByDirection) {
+                const directionSection = document.createElement('div');
+                directionSection.classList.add('direction-section');
+
+                const directionTitle = document.createElement('h2');
+                directionTitle.textContent = `Dirección: ${directionId}`;
+                directionSection.appendChild(directionTitle);
+
+                let trainsInThisDirection = false;
+
+                for (const headsign in resultsByDirection[directionId]) {
+                    const sortedTrains = resultsByDirection[directionId][headsign].sort((a, b) => a.timeToArrival - b.timeToArrival);
+                    const nextThreeTrains = sortedTrains.slice(0, 3); // Get the next 3 trains
+
+                    if (nextThreeTrains.length > 0) {
+                        trainsInThisDirection = true;
+                        anyTrainFound = true;
+
+                        const headsignTitle = document.createElement('h3');
+                        headsignTitle.textContent = `Destino: ${headsign}`;
+                        directionSection.appendChild(headsignTitle);
+
+                        nextThreeTrains.forEach(train => {
+                            const trainInfoDiv = document.createElement('div');
+                            trainInfoDiv.classList.add('train-info');
+
+                            const timeEstimated = Math.round(train.timeToArrival);
+                            const timeRounded = formatMinutesToHHMM(convertTimeToMinutes(train.arrivalTime));
+
+                            trainInfoDiv.innerHTML = `
+                                <strong>${formatTime(timeEstimated, timeRounded)}</strong>
+                                <span>(Llegada: ${train.arrivalTime})</span>
+                            `;
+                            directionSection.appendChild(trainInfoDiv);
+                        });
+                    }
+                }
+
+                if (trainsInThisDirection) {
+                    dynamicResultsContainer.appendChild(directionSection);
+                } else if (!desiredHeadsign) { // If no specific headsign was requested, but no trains found in this direction
+                     const noTrainsP = document.createElement('p');
+                     noTrainsP.classList.add('no-trains');
+                     noTrainsP.textContent = `No se encontraron trenes próximos en esta dirección (${directionId}).`;
+                     directionSection.appendChild(noTrainsP);
+                     dynamicResultsContainer.appendChild(directionSection);
+                }
+            }
+
+            if (!anyTrainFound && allResults.length > 0) {
+                const generalNoTrainsP = document.createElement('p');
+                generalNoTrainsP.classList.add('error');
+                generalNoTrainsP.textContent = 'No se encontraron trenes próximos en ninguna dirección para esta estación.';
+                if (dynamicResultsContainer.children.length === 0) { 
+                    dynamicResultsContainer.appendChild(generalNoTrainsP);
+                }
+            }
+        }
+
+        function formatTime(timeEstimated, timeRounded) {
+            const formatMinutesToText = (minutes) => {
+                if (minutes === 0) {
+                    return 'En estación';
+                } else if (minutes === 1) {
+                    return '1 minuto';
+                } else if (minutes < 60) {
+                    return `${minutes} minutos`;
+                } else {
+                    const hours = Math.floor(minutes / 60);
+                    const remainingMinutes = minutes % 60;
+                    return `${hours}h ${remainingMinutes}min`;
+                }
+            };
+
+            const estimatedText = formatMinutesToText(timeEstimated);
+
+            // Aseguramos que timeRounded sea una cadena válida o 'N/A'
+            const roundedTimeText = (typeof timeRounded === 'string' && timeRounded.trim() !== '') ? timeRounded.trim() : 'N/A';
+
+            return `${estimatedText} (${roundedTimeText})`;
+        }
+
+        // Initial data load when the page loads
+        document.addEventListener('DOMContentLoaded', loadData);
     </script>
 </body>
 </html>
