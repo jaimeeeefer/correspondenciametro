@@ -387,7 +387,7 @@
                     timeDifference += 24 * 60;
                 }
 
-                if (timeDifference >= 0 || (timeDifference > -5 && timeDifference < 0) ) { 
+                if (timeDifference >= 0 || (timeDifference > -3 && timeDifference < 0) ) { 
                     const trip = bizkaibusTripsData.find(t => t.trip_id === stopTime.trip_id);
                     if (trip) {
                         bizkaibusDepartures.push({
