@@ -596,10 +596,15 @@
                         const realTimeDate = realTimeBus.recordedAtTime;
                         let delayMinutes = (realTimeDate.getTime() - theoreticalDate.getTime()) / 60000;
 
-                        if (delayMinutes > 720) delayMinutes -= 1440;
-                        if (delayMinutes < -720) delayMinutes += 1440;
+                        // Ignorar si aún no ha salido de origen
+                        if (delayMinutes < 0) {
+                            bus.delayMinutes = 0; // No se aplica adelanto aún
+                        } else {
+                            if (delayMinutes > 720) delayMinutes -= 1440;
+                            if (delayMinutes < -720) delayMinutes += 1440;
 
-                        bus.delayMinutes = delayMinutes;
+                            bus.delayMinutes = delayMinutes;
+                        }
 
                         const cleanTime = bus.departureTime.split(':').slice(0, 2).join(':');
                         const baseMinutes = convertTimeToMinutes(cleanTime);
