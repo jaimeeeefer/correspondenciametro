@@ -680,10 +680,10 @@
 
                             const timeDifferenceMetroBus = estimatedBusTime - train.arrivalTimeAtDestinationMinutes;
 
-                            if (timeDifferenceMetroBus >= 2 && timeDifferenceMetroBus <= 10) {
+                            if (timeDifferenceMetroBus > 2 && timeDifferenceMetroBus <= 10) {
                                 correspondenceMessage = `<span class="correspondence-text">Enlace</span>`;
                                 return true;
-                            } else if (timeDifferenceMetroBus >= 0.5 && timeDifferenceMetroBus < 2) {
+                            } else if (timeDifferenceMetroBus >= 0.5 && timeDifferenceMetroBus <= 2) {
                                 correspondenceMessage = `<span class="correspondencejusta-text">Enlace justo</span>`;
                                 return true;
                             } else if (timeDifferenceMetroBus > 10 && timeDifferenceMetroBus <= 15) {
