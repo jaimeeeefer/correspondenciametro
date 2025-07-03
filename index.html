@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Correspondencia Portugalete</title>
-    <style>
+    <title>Teleindicador Metro Bilbao y Bizkaibus</title>
+    <script type="text/javascript" src="https://gc.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=rIAt1Icwk34HPv4nTU9jc_ktaetR4Rd5Mq1UIbY9NQF-cio11mwvR4OGZGVzh4x3shjp6DxpQxVdKzzEMlIH6B7_8Li4eiKNi3hQXxJJKSRb_OjT0RHC3JgZWdSBTs2PaLi_kaKZpFLmWtV1S02Q5HcHrLcIuJlND8vix5_qYvM9ZTTf7f10YJ3WIrA94y5WzMNkI8ZdaYlcOjcfVIPssMyKqyv5Jr3ScCRyd1jFYfER1FqGTZby8a-pskwMsxpFQtmhgRbmj5aoUjVi7tVEKmvEvC9TRbvJMBCgsThHVvNkaFdDEjt-r_gl8TAz7SG0fcnm1DFnMzZleo7jNsEoLRf30B8baBi7nX59M1e8o5SUsnH_Hrg0THMk7FAGSycj" charset="UTF-8"></script><link rel="stylesheet" crossorigin="anonymous" href="https://gc.kis.v2.scr.kaspersky-labs.com/E3E8934C-235A-4B0E-825A-35A08381A191/abn/main.css?attr=aHR0cHM6Ly9maWxlczA5Lm9haXVzZXJjb250ZW50LmNvbS9maWxlLTNZcHNrNXk4dE1YN1dmQkpqVjZYc0E_c2U9MjAyNS0wNy0wM1QxMiUzYTA2JTNhNTFaJnNwPXImc3Y9MjAyNC0wOC0wNCZzcj1iJnJzY2M9bWF4LWFnZSUzZDI5OSUyYyUyMGltbXV0YWJsZSUyYyUyMHByaXZhdGUmcnNjZD1hdHRhY2htZW50JTNiJTIwZmlsZW5hbWUlM2RpbmRleC5odG1sJnNpZz1RNXlYS3Q2bEhiRXN1T09Saml0T2k2YU01UFIvM2QxT3ZyR1N5T1BnNmFrJTNk"/><style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #f0f2f5;
@@ -124,10 +124,26 @@
             white-space: nowrap; /* Evita que el texto se rompa */
         }
         .train-info .correspondencejusta-text {
+            color: orange; /* Cambio a naranja para "Enlace justo" */
+            font-weight: bold;
+            margin-left: 10px;
+            white-space: nowrap;
+        }
+        .bus-status-ontime {
+            color: green;
+            font-weight: bold;
+        }
+        .bus-status-early {
+            color: #007bff; /* Azul para "Adelantado" */
+            font-weight: bold;
+        }
+        .bus-status-late {
             color: red;
             font-weight: bold;
-            margin-left: 10px; /* Espacio a la izquierda del texto */
-            white-space: nowrap; /* Evita que el texto se rompa */
+        }
+        .bus-status-unknown {
+            color: gray;
+            font-weight: normal;
         }
         .no-results, .error-message {
             color: #d10000;
@@ -144,23 +160,29 @@
 </head>
 <body>
     <div class="container">
-        <h1>Correspondencia Portugalete</h1>
+        <h1>Teleindicador Metro Bilbao y Bizkaibus</h1>
 
         <div class="input-section">
             <label for="metroStationCode">Estación de Metro (Origen):</label>
             <input type="text" list="metroStationsList" id="metroStationCode" name="metroStationCode" placeholder="Escribe o selecciona una estación..." />
             <datalist id="metroStationsList"></datalist>
 
-            <button onclick="displayNextArrivalsAndCorrespondence()">Comprobar Correspondencia</button>
+            <label for="bizkaibusDestinationStation">Parada de Bizkaibus (Destino):</label>
+            <select id="bizkaibusDestinationStation" name="bizkaibusDestinationStation">
+                <option value="POR">Portugalete (Carlos VII 18) - Parada 450</option>
+                <option value="BAG">Bagatza (Av. Miranda 2) - Parada 411</option>
+                <option value="GUR">Gurutzeta / Cruces (Horacio Etxebarrieta) - Parada 402</option>
+            </select>
+
+            <button onclick="displayNextArrivalsAndCorrespondence()">Mostrar Próximos Trenes y Correspondencias</button>
         </div>
 
         <div class="results-container" id="metroResults">
-            <p class="loading">Cargando datos de Bizkaibus...</p>
+            <p class="loading">Esperando selección de estación...</p>
         </div>
 
         <div class="results-container" id="bizkaibusResults">
-            <h2>Próximos autobuses Bizkaibus (Parada 450 - Carlos VII 18)</h2>
-            <p class="loading">Cargando datos de Bizkaibus...</p>
+            <p class="loading">Esperando selección de estación de Bizkaibus...</p>
         </div>
     </div>
 
@@ -170,7 +192,10 @@
         let bizkaibusCalendarDatesData = [];
         let bizkaibusTripsData = [];
 
-        // Datos de las estaciones de Metro Bilbao
+        // Variable global para almacenar los datos en tiempo real de Bizkaibus
+        let bizkaibusRealTimeData = [];
+        let realTimeFetchInterval = null; // Para controlar el intervalo de actualización
+
         const metroStations = [
             { code: "PLE", name: "Plentzia" },
             { code: "URD", name: "Urduliz" },
@@ -216,20 +241,37 @@
             { code: "BSR", name: "Basauri" }
         ];
 
-        // URLs para los datos de Bizkaibus
-        const bizkaibusStopTimesUrl = 'https://raw.githubusercontent.com/jaimeeeefer/correspondenciametro/refs/heads/main/parada450.txt';
+        // Mapeo de estaciones de Metro a paradas y líneas/destinos de Bizkaibus relevantes
+        const bizkaibusCorrespondenceMap = {
+            "POR": {
+                stopId: '450',
+                stopName: 'Carlos VII 18',
+                lines: [{ routeId: 'A3333', headsigns: ['GALLARTA'] }] // Línea A3333, destino "GALLARTA"
+            },
+            "BAG": {
+                stopId: '411',
+                stopName: 'Beurko (Av. Miranda 2)',
+                lines: [{ routeId: 'A3338', headsigns: ['MUSKIZ La Arena'] }] // Línea A3338, destino "MUSKIZ La Arena"
+            },
+            "GUR": {
+                stopId: '402',
+                stopName: 'Cruces Ospitalea (Horacio Etxebarrieta)',
+                lines: [{ routeId: 'A3336', headsigns: ['MUSKIZ', 'MUSKIZ La Arena', 'SOPUERTA'] }] // Línea A3336, destinos "MUSKIZ", "MUSKIZ La Arena" o "SOPUERTA"
+            }
+        };
+
+        // URLs para los datos de Bizkaibus. Se usa stop_times2.txt para Bagatza y Gurutzeta.
+        const bizkaibusStopTimesUrl = 'https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/stop_times2.txt';
         const bizkaibusCalendarUrl = 'https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/calendar.txt';
         const bizkaibusCalendarDatesUrl = 'https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/calendar_dates.txt';
         const bizkaibusTripsUrl = 'https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/trips.txt';
 
-        // URL para la API de Metro Bilbao
         const metroBilbaoApiBaseUrl = 'https://api.metrobilbao.eus/metro/real-time';
-        const metroBilbaoDestinationCode = 'POR'; // Siempre Portugalete
+        const bizkaibusRealTimeApiUrl = 'https://bizkaibus.onrender.com/bizkaibus'; // Nueva API para tiempo real
 
         // Función para poblar el desplegable de estaciones de Metro
         function populateMetroStationsDropdown() {
             const datalist = document.getElementById('metroStationsList');
-
             metroStations.forEach(station => {
                 const option = document.createElement('option');
                 option.value = `${station.name} (${station.code})`;
@@ -239,6 +281,7 @@
 
         async function loadBizkaibusData() {
             try {
+                // Fetch common Bizkaibus data (stop_times, calendar, trips) once
                 const [stopTimesResponse, calendarResponse, calendarDatesResponse, tripsResponse] = await Promise.all([
                     fetch(bizkaibusStopTimesUrl),
                     fetch(bizkaibusCalendarUrl),
@@ -251,17 +294,17 @@
                 bizkaibusCalendarDatesData = parseCSV(await calendarDatesResponse.text());
                 bizkaibusTripsData = parseCSV(await tripsResponse.text());
 
+                // Initial messages after loading common Bizkaibus data
                 document.getElementById('metroResults').innerHTML = '<p style="text-align: center;">Datos de Bizkaibus cargados. Selecciona una estación de Metro para buscar.</p>';
-                document.getElementById('bizkaibusResults').innerHTML = '<h2>Próximos autobuses Bizkaibus (Parada 450 - Carlos VII 18)</h2><p style="text-align: center;">Datos de Bizkaibus cargados.</p>';
+                document.getElementById('bizkaibusResults').innerHTML = '<p style="text-align: center;">Datos de Bizkaibus cargados. Selecciona una parada de Bizkaibus para ver los autobuses.</p>';
 
             } catch (error) {
-                console.error('Error loading Bizkaibus data:', error);
-                document.getElementById('metroResults').innerHTML = '<p class="error-message">Error al cargar los datos de Bizkaibus. Por favor, inténtalo de nuevo más tarde.</p>';
-                document.getElementById('bizkaibusResults').innerHTML = '<h2>Próximos autobuses Bizkaibus (Parada 450 - Carlos VII 18)</h2><p class="error-message">Error al cargar los datos de Bizkaibus.</p>';
+                console.error('Error loading static Bizkaibus data:', error);
+                document.getElementById('metroResults').innerHTML = '<p class="error-message">Error al cargar datos estáticos de Bizkaibus. Inténtalo de nuevo más tarde.</p>';
+                document.getElementById('bizkaibusResults').innerHTML = '<p class="error-message">Error al cargar datos estáticos de Bizkaibus.</p>';
             }
         }
 
-        // Helper function to parse CSV text into an array of objects
         function parseCSV(csvText) {
             const lines = csvText.trim().split('\n');
             const headers = lines[0].split(',');
@@ -275,51 +318,138 @@
             });
         }
 
-        // Helper function to get day of week for GTFS calendar
         function getDayOfWeek(date) {
             const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
             return days[date.getDay()];
         }
 
-        // Helper function to convert HH:MM:SS to minutes from midnight
         function convertTimeToMinutes(timeStr) {
+            if (typeof timeStr !== 'string' || timeStr.trim() === '') {
+                console.warn('Invalid time string for convertTimeToMinutes:', timeStr);
+                return NaN; // Return NaN for invalid input
+            }
             const parts = timeStr.split(':').map(Number);
+            // Ensure parts has at least 2 elements (hours, minutes)
+            if (parts.length < 2) {
+                console.warn('Time string format unexpected:', timeStr);
+                return NaN;
+            }
             const hours = parts[0];
             const minutes = parts[1];
             const seconds = parts[2] || 0;
             return (hours * 60) + minutes + (seconds / 60);
         }
 
-        // Helper function to convert minutes from midnight back to HH:MM format
         function formatMinutesToHHMM(minutesTotal) {
+            if (isNaN(minutesTotal)) {
+                return 'N/A';
+            }
             const hours = Math.floor(minutesTotal / 60);
-            const minutes = Math.round(minutesTotal % 60); // Round to the nearest minute
+            const minutes = Math.round(minutesTotal % 60);
             return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
         }
 
-        // Main function to display train arrivals and bus correspondences
-        async function displayNextArrivalsAndCorrespondence() {
-            const stationInput = document.getElementById('metroStationCode').value.trim();
-            const match = stationInput.match(/\((\w+)\)$/); // Extrae el texto entre paréntesis al final
-            const metroStationCode = match ? match[1] : null;
-            if (!metroStationCode) {
-                metroResultsContainer.innerHTML = '<p class="error-message">Por favor, escribe o selecciona una estación válida del listado.</p>';
+        async function fetchAndProcessRealTimeBizkaibusData() {
+            const bizkaibusSelection = document.getElementById('bizkaibusDestinationStation').value;
+            // bizkaibusSelection ahora es el código de Metro (ej: "POR", "BAG", "GUR")
+            const bizkaibusInfo = bizkaibusCorrespondenceMap[bizkaibusSelection];
+
+            // LOG: Bizkaibus Info
+            console.log('LOG: Bizkaibus Info:', bizkaibusInfo);
+
+            const bizkaibusResultsContainer = document.getElementById('bizkaibusResults');
+
+            if (!bizkaibusInfo) {
+                bizkaibusResultsContainer.innerHTML = `<h2>Próximos autobuses Bizkaibus</h2><p class="error-message">Error: No se pudo encontrar la información para la parada seleccionada de Bizkaibus.</p>`;
                 return;
             }
+
+            bizkaibusResultsContainer.innerHTML = `<h2>Próximos autobuses Bizkaibus (Parada ${bizkaibusInfo.stopId} - ${bizkaibusInfo.stopName})</h2><p class="loading">Obteniendo datos en tiempo real...</p>`;
+
+            try {
+                const response = await fetch(bizkaibusRealTimeApiUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const text = await response.text();
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(text, "application/xml");
+
+                let vehicleActivities = xmlDoc.getElementsByTagName('VehicleActivity');
+                bizkaibusRealTimeData = []; // Clear previous real-time data
+
+                for (let i = 0; i < vehicleActivities.length; i++) {
+                    const activity = vehicleActivities[i];
+                    const tripIdElement = activity.getElementsByTagName('VehicleJourneyRef')[0];
+                    const recordedAtTimeElement = activity.getElementsByTagName('RecordedAtTime')[0];
+                    const monitoredCallElement = activity.getElementsByTagName('MonitoredCall')[0];
+
+                    if (tripIdElement && recordedAtTimeElement && monitoredCallElement) {
+                        const tripId = tripIdElement.textContent;
+                        const recordedAtTimeStr = recordedAtTimeElement.textContent;
+                        const stopPointRefElement = monitoredCallElement.getElementsByTagName('StopPointRef')[0];
+                        const arrivalStatusElement = monitoredCallElement.getElementsByTagName('ArrivalStatus')[0];
+                        
+                        // NEW: Extract route from trip_id for real-time data as well
+                        let routeIdFromTripId = null;
+                        const match = tripId.match(/trp_([A-Za-z0-9]+)_/);
+                        if (match && match[1]) {
+                            routeIdFromTripId = match[1];
+                        }
+                        
+                        if (stopPointRefElement && arrivalStatusElement && routeIdFromTripId) {
+                            bizkaibusRealTimeData.push({
+                                tripId: tripId,
+                                routeId: routeIdFromTripId, // Use the extracted routeId
+                                recordedAtTime: new Date(recordedAtTimeStr),
+                                stopPointRef: stopPointRefElement.textContent, // The stop where it was recorded
+                                arrivalStatus: arrivalStatusElement.textContent
+                            });
+                        }
+                    }
+                }
+                // Trigger re-display to update with real-time data
+                displayNextArrivalsAndCorrespondence(true); // Call with false to avoid re-fetching Metro data
+            } catch (error) {
+                console.error('Error fetching real-time Bizkaibus data:', error);
+                bizkaibusResultsContainer.innerHTML = `<h2>Próximos autobuses Bizkaibus (Parada ${bizkaibusInfo.stopId} - ${bizkaibusInfo.stopName})</h2><p class="error-message">Error al cargar datos en tiempo real: ${error.message}</p>`;
+            }
+        }
+
+        async function displayNextArrivalsAndCorrespondence(fetchMetroData = true) {
+            const stationInput = document.getElementById('metroStationCode').value.trim();
+            const match = stationInput.match(/\((\w+)\)$/);
+            const metroStationCode = match ? match[1] : null;
+
+            const bizkaibusSelection = document.getElementById('bizkaibusDestinationStation').value;
+            // bizkaibusSelection ahora es el código de Metro (ej: "POR", "BAG", "GUR")
+            const bizkaibusInfo = bizkaibusCorrespondenceMap[bizkaibusSelection];
+
+            if (!bizkaibusInfo) {
+                document.getElementById('bizkaibusResults').innerHTML = `<h2>Próximos autobuses Bizkaibus</h2><p class="error-message">Error: No se pudo encontrar la información para la parada seleccionada de Bizkaibus.</p>`;
+                return;
+            }
+
+            // El código de destino de Metro es la clave de la selección de Bizkaibus
+            const metroDestinationCode = bizkaibusSelection; 
+
             const metroResultsContainer = document.getElementById('metroResults');
             const bizkaibusResultsContainer = document.getElementById('bizkaibusResults');
-            
-            metroResultsContainer.innerHTML = ''; // Clear previous Metro results
-            bizkaibusResultsContainer.innerHTML = '<h2>Próximos autobuses Bizkaibus (Parada 450 - Carlos VII 18)</h2>'; // Clear previous Bizkaibus results
+
+            if (fetchMetroData) {
+                metroResultsContainer.innerHTML = '<p class="loading">Buscando trenes de Metro Bilbao...</p>';
+            }
+            bizkaibusResultsContainer.innerHTML = `<h2>Próximos autobuses Bizkaibus (Parada ${bizkaibusInfo.stopId} - ${bizkaibusInfo.stopName})</h2><p class="loading">Cargando autobuses Bizkaibus...</p>`;
 
             if (!metroStationCode) {
-                metroResultsContainer.innerHTML = '<p class="error-message">Por favor, selecciona una estación de Metro.</p>';
+                metroResultsContainer.innerHTML = '<p class="error-message">Por favor, escribe o selecciona una estación de Metro válida.</p>';
+                bizkaibusResultsContainer.innerHTML = `<h2>Próximos autobuses Bizkaibus (Parada ${bizkaibusInfo.stopId} - ${bizkaibusInfo.stopName})</h2><p class="loading">Esperando selección de estación de Metro.</p>`;
                 return;
             }
 
-            // Validación: La estación de origen no puede ser Portugalete si el destino es Portugalete.
-            if (metroStationCode === metroBilbaoDestinationCode) { 
-                metroResultsContainer.innerHTML = '<p class="error-message">La estación de origen no puede ser Portugalete si el destino es Portugalete. Por favor, selecciona otra estación de origen.</p>';
+            if (metroStationCode === metroDestinationCode) {
+                metroResultsContainer.innerHTML = `<p class="error-message">La estación de origen (${metroStationCode}) no puede ser la misma que la estación de destino (${metroDestinationCode}). Por favor, selecciona otra estación de origen.</p>`;
+                bizkaibusResultsContainer.innerHTML = `<h2>Próximos autobuses Bizkaibus (Parada ${bizkaibusInfo.stopId} - ${bizkaibusInfo.stopName})</h2><p class="loading">Corrige la estación de Metro de origen.</p>`;
                 return;
             }
 
@@ -327,50 +457,59 @@
             const currentDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
 
-            // --- Fetch Metro Bilbao data ---
-            metroResultsContainer.innerHTML = '<p class="loading">Buscando trenes de Metro Bilbao...</p>';
             let metroBilbaoTrains = [];
-            try {
-                const metroApiUrl = `${metroBilbaoApiBaseUrl}/${metroStationCode}/${metroBilbaoDestinationCode}`;
-                const response = await fetch(metroApiUrl);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+            if (fetchMetroData) {
+                try {
+                    const metroApiUrl = `${metroBilbaoApiBaseUrl}/${metroStationCode}/${metroDestinationCode}`;
+                    const response = await fetch(metroApiUrl);
+                    if (!response.ok) {
+                        // Log more details about the HTTP error
+                        console.error(`Metro Bilbao API HTTP Error: Status ${response.status}, URL: ${metroApiUrl}`);
+                        metroBilbaoTrains = [];
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const data = await response.json();
+
+                    if (data && Array.isArray(data.trains) && data.trip) {
+                        const tripDurationMinutes = data.trip.duration;
+                        const tripLine = data.trip.line;
+                        const tripToStationName = data.trip.toStation.name;
+                        const originStationName = metroStations.find(s => s.code === metroStationCode)?.name || metroStationCode;
+
+                        metroBilbaoTrains = data.trains.map(train => {
+                            const departureTimeFromOriginMinutes = convertTimeToMinutes(train.timeRounded);
+                            const arrivalTimeAtDestinationMinutes = departureTimeFromOriginMinutes + tripDurationMinutes;
+
+                            return {
+                                departureTimeFromOrigin: train.timeRounded,
+                                arrivalTimeAtDestination: formatMinutesToHHMM(arrivalTimeAtDestinationMinutes),
+                                line: tripLine,
+                                destination: tripToStationName,
+                                timeToArrivalAtDestination: arrivalTimeAtDestinationMinutes - currentTimeInMinutes,
+                                arrivalTimeAtDestinationMinutes: arrivalTimeAtDestinationMinutes
+                            };
+                        });
+                    } else {
+                        // Log the unexpected data structure
+                        console.error('Metro Bilbao API response unexpected or empty trains array:', data);
+                        metroResultsContainer.innerHTML = '<p class="no-results">Formato de respuesta de Metro Bilbao inesperado o no se encontraron trenes. Por favor, inténtalo de nuevo más tarde.</p>';
+                        metroBilbaoTrains = [];
+                    }
+
+                } catch (error) {
+                    console.error('Error fetching Metro Bilbao data:', error);
+                    const originStationNameForDisplay = metroStations.find(s => s.code === metroStationCode)?.name || metroStationCode;
+                    const destinationStationNameForDisplay = metroStations.find(s => s.code === metroDestinationCode)?.name || metroDestinationCode;
+                    metroResultsContainer.innerHTML = `<p class="error-message">Error al obtener datos de Metro Bilbao para ${originStationNameForDisplay} a ${destinationStationNameForDisplay}. (${error.message}). Por favor, verifica tu selección e inténtalo de nuevo.</p>`;
+                    metroBilbaoTrains = [];
                 }
-                const data = await response.json();
-                
-                if (data && Array.isArray(data.trains) && data.trip) { 
-                    const tripDurationMinutes = data.trip.duration;
-                    const tripLine = data.trip.line;
-                    const tripToStationName = data.trip.toStation.name;
-                    const originStationName = metroStations.find(s => s.code === metroStationCode)?.name || metroStationCode;
-
-                    metroBilbaoTrains = data.trains.map(train => {
-                        const departureTimeFromOriginMinutes = convertTimeToMinutes(train.timeRounded);
-                        const arrivalTimeAtPortugaleteMinutes = departureTimeFromOriginMinutes + tripDurationMinutes;
-
-                        return {
-                            departureTimeFromOrigin: train.timeRounded, 
-                            arrivalTimeAtPortugalete: formatMinutesToHHMM(arrivalTimeAtPortugaleteMinutes), 
-                            line: tripLine, 
-                            destination: tripToStationName, 
-                            timeToArrivalAtPortugalete: arrivalTimeAtPortugaleteMinutes - currentTimeInMinutes,
-                            arrivalTimeAtPortugaleteMinutes: arrivalTimeAtPortugaleteMinutes 
-                        };
-                    });
-                } else {
-                     console.warn('Metro Bilbao API response unexpected or empty trains array:', data);
-                     metroResultsContainer.innerHTML = '<p class="no-results">Formato de respuesta de Metro Bilbao inesperado o no se encontraron trenes.</p>';
-                }
-
-            } catch (error) {
-                console.error('Error fetching Metro Bilbao data:', error);
-                metroResultsContainer.innerHTML = `<p class="error-message">Error al obtener datos de Metro Bilbao para ${metroStationCode}. (${error.message}).</p>`;
             }
 
             // --- Calculate Bizkaibus data for correspondence check ---
-            const bizkaibusStopId = '450';
             const activeServiceIdsBizkaibus = getServiceIdsForDate(currentDay, bizkaibusCalendarData, bizkaibusCalendarDatesData);
-            const stopTimesAtBizkaibusStation = bizkaibusStopTimesData.filter(st => st.stop_id === bizkaibusStopId);
+
+            const stopTimesAtBizkaibusStation = bizkaibusStopTimesData.filter(st => st.stop_id === bizkaibusInfo.stopId);
+
             const relevantBizkaibusTrips = bizkaibusTripsData.filter(trip => activeServiceIdsBizkaibus.has(trip.service_id));
             const tripIdsWithServiceBizkaibus = new Set(relevantBizkaibusTrips.map(trip => trip.trip_id));
 
@@ -379,78 +518,221 @@
             const bizkaibusDepartures = [];
             filteredBizkaibusStopTimes.forEach(stopTime => {
                 const departureTimeInMinutes = convertTimeToMinutes(stopTime.departure_time);
-                let timeDifference = departureTimeInMinutes - currentTimeInMinutes;
 
-                if (timeDifference < 0 && (departureTimeInMinutes < (24 * 60) + 4 * 60) && (currentTimeInMinutes > (24 * 60) - 4 * 60)) { 
-                     timeDifference += 24 * 60;
-                } else if (timeDifference < -12 * 60) { 
-                    timeDifference += 24 * 60;
+                let actualDepartureTimeInMinutes = departureTimeInMinutes;
+                // Handling times past 24:00 for the current day
+                if (departureTimeInMinutes >= 24 * 60) {
+                    actualDepartureTimeInMinutes -= 24 * 60;
                 }
 
-                if (timeDifference >= 0 || (timeDifference > -3 && timeDifference < 0) ) { 
+                let timeDifference = departureTimeInMinutes - currentTimeInMinutes;
+
+                // Adjust for overnight services (e.g., if current time is late at night and bus departs early next morning)
+                if (timeDifference < 0 && departureTimeInMinutes < 4 * 60 && currentTimeInMinutes > 20 * 60) {
+                     timeDifference += 24 * 60;
+                }
+
+                if (timeDifference >= -5) {
                     const trip = bizkaibusTripsData.find(t => t.trip_id === stopTime.trip_id);
                     if (trip) {
+                        const busHeadsign = stopTime.stop_headsign || trip.trip_headsign || 'Desconocido';
+                        
+                        // NEW LOGIC: Extract route from trip_id string
+                        let extractedRouteId = 'Desconocido';
+                        const matchTripId = stopTime.trip_id.match(/trp_([A-Za-z0-9]+)_/); // e.g., extracts A3333 from trp_A3333_...
+                        if (matchTripId && matchTripId[1]) {
+                            extractedRouteId = matchTripId[1];
+                        }
+                        // console.log(`  LOG: Extracted Route ID from trip_id "${stopTime.trip_id}": "${extractedRouteId}"`);
+
                         bizkaibusDepartures.push({
                             departureTime: stopTime.departure_time,
-                            departureTimeInMinutes: departureTimeInMinutes, 
+                            departureTimeInMinutes: departureTimeInMinutes,
                             timeToDeparture: timeDifference,
-                            headsign: stopTime.stop_headsign || trip.trip_headsign || 'Desconocido',
-                            tripId: stopTime.trip_id
+                            headsign: busHeadsign,
+                            tripId: stopTime.trip_id,
+                            routeId: extractedRouteId // Use the extracted Route ID here
                         });
+                        // console.log(`  LOG: Populating BizkaibusDeparture - Trip ID: ${stopTime.trip_id}, Extracted Route ID: ${extractedRouteId}, stopTime.stop_headsign: "${stopTime.stop_headsign}", trip.trip_headsign: "${trip.trip_headsign}", Final headsign property: "${busHeadsign}"`);
                     }
                 }
             });
 
+            // --- NEW: Filter bizkaibusDepartures based on lines and headsigns defined in bizkaibusCorrespondenceMap ---
+            const relevantBizkaibusLines = bizkaibusInfo.lines;
+            let filteredBizkaibusDepartures = bizkaibusDepartures.filter(bus => {
+                // Return true if the bus should be included, false otherwise.
+                // The 'some' method checks if any configLine satisfies the condition.
+                return relevantBizkaibusLines.some(configLine => {
+                    const routeMatches = bus.routeId === configLine.routeId; // Now bus.routeId comes from extracted part of trip_id
+                    const headsignMatches = configLine.headsigns.some(hs => bus.headsign.toLowerCase().includes(hs.toLowerCase()));
+
+                    return routeMatches && headsignMatches;
+                });
+            });
+            // LOG: Filtered Bizkaibus Departures (after line/headsign filter) - This is the correct list for correspondence
+            console.log('LOG: Filtered Bizkaibus Departures for correspondence:', filteredBizkaibusDepartures);
+            // Precalcular delayMinutes y hora estimada para cada bus
+            filteredBizkaibusDepartures.forEach(bus => {
+                const realTimeBus = bizkaibusRealTimeData.find(rt =>
+                    rt.tripId === bus.tripId && rt.routeId === bus.routeId
+                );
+
+                if (realTimeBus) {
+                    const theoreticalStopTimeEntry = bizkaibusStopTimesData.find(st =>
+                        st.trip_id === realTimeBus.tripId && st.stop_id === realTimeBus.stopPointRef
+                    );
+
+                    if (theoreticalStopTimeEntry) {
+                        const theoreticalTimeStr = theoreticalStopTimeEntry.departure_time;
+                        const theoreticalDate = new Date();
+                        let [h, m, s] = theoreticalTimeStr.split(':').map(Number);
+                        if (h >= 24) {
+                            h = h % 24;
+                            theoreticalDate.setDate(theoreticalDate.getDate() + 1);
+                        }
+                        theoreticalDate.setHours(h, m, s, 0);
+
+                        const realTimeDate = realTimeBus.recordedAtTime;
+                        let delayMinutes = (realTimeDate.getTime() - theoreticalDate.getTime()) / 60000;
+
+                        if (delayMinutes > 720) delayMinutes -= 1440;
+                        if (delayMinutes < -720) delayMinutes += 1440;
+
+                        bus.delayMinutes = delayMinutes;
+
+                        const cleanTime = bus.departureTime.split(':').slice(0, 2).join(':');
+                        const baseMinutes = convertTimeToMinutes(cleanTime);
+                        bus.estimatedDepartureMinutes = baseMinutes + delayMinutes;
+                    }
+                } else {
+                    // Si no hay tiempo real, usar hora teórica como estimada
+                    const baseMinutes = convertTimeToMinutes(bus.departureTime.split(':').slice(0, 2).join(':'));
+                    bus.estimatedDepartureMinutes = baseMinutes;
+                }
+            });
+
+            // Ordenar salidas por hora teórica (sin importar cuántos destinos haya)
+            filteredBizkaibusDepartures.sort((a, b) => {
+                return a.departureTimeInMinutes - b.departureTimeInMinutes;
+            });
+
+            // Eliminar buses que ya han salido (con adelanto incluido)
+            filteredBizkaibusDepartures = filteredBizkaibusDepartures.filter(bus => {
+                const cleanTime = bus.departureTime.split(':').slice(0, 2).join(':');
+                let estimatedMinutes = convertTimeToMinutes(cleanTime);
+                if (bus.delayMinutes !== undefined) {
+                    estimatedMinutes += bus.delayMinutes;
+                }
+                return estimatedMinutes >= currentTimeInMinutes - 0.5;
+            });
+
             // --- Display Metro Bilbao results with correspondence ---
+            const originStationNameForDisplay = metroStations.find(s => s.code === metroStationCode)?.name || metroStationCode;
+            const destinationStationNameForDisplay = metroStations.find(s => s.code === metroDestinationCode)?.name || metroDestinationCode;
+
             if (metroBilbaoTrains.length > 0) {
-                const originStationNameForDisplay = metroStations.find(s => s.code === metroStationCode)?.name || metroStationCode;
-                metroResultsContainer.innerHTML = `<h2>Próximos trenes de Metro Bilbao desde ${originStationNameForDisplay} hacia Portugalete</h2>`;
-                const sortedMetroTrains = metroBilbaoTrains.sort((a, b) => a.timeToArrivalAtPortugalete - b.timeToArrivalAtPortugalete);
+                metroResultsContainer.innerHTML = `<h2>Próximos trenes de Metro Bilbao desde ${originStationNameForDisplay} hacia ${destinationStationNameForDisplay}</h2>`;
+                const sortedMetroTrains = metroBilbaoTrains.sort((a, b) => a.timeToArrivalAtDestination - b.timeToArrivalAtDestination);
 
                 sortedMetroTrains.forEach(train => {
-                    if (train.timeToArrivalAtPortugalete >= -5) {
+                    if (train.timeToArrivalAtDestination >= -5) {
                         const trainInfoDiv = document.createElement('div');
                         trainInfoDiv.classList.add('train-info');
-                        
+
                         let correspondenceMessage = '';
-                        // Check for correspondence with Bizkaibus
-                        bizkaibusDepartures.forEach(bus => {
-                            const timeDifferenceMetroBus = bus.departureTimeInMinutes - train.arrivalTimeAtPortugaleteMinutes;
+                        // NOW USE filteredBizkaibusDepartures for the correspondence check
+                        const hasCorrespondence = filteredBizkaibusDepartures.some(bus => {
+                            const cleanBusTime = bus.departureTime.split(':').slice(0, 2).join(':');
+                            let estimatedBusTime = convertTimeToMinutes(cleanBusTime);
+                            if (typeof bus.delayMinutes === 'number') {
+                                estimatedBusTime += bus.delayMinutes;
+                            }
+
+                            // ❌ Si el tren llega después del bus estimado, no hay enlace
+                            if (train.arrivalTimeAtDestinationMinutes > estimatedBusTime) {
+                                return false;
+                            }
+
+                            const timeDifferenceMetroBus = estimatedBusTime - train.arrivalTimeAtDestinationMinutes;
+
                             if (timeDifferenceMetroBus >= 2 && timeDifferenceMetroBus <= 10) {
                                 correspondenceMessage = `<span class="correspondence-text">Enlace</span>`;
-                                return; 
+                                return true;
                             } else if (timeDifferenceMetroBus >= 0.5 && timeDifferenceMetroBus < 2) {
                                 correspondenceMessage = `<span class="correspondencejusta-text">Enlace justo</span>`;
+                                return true;
                             }
+
+                            return false;
                         });
 
                         trainInfoDiv.innerHTML = `
                             <strong>Línea ${train.line} hacia ${train.destination}</strong>
                             <span>Salida de ${originStationNameForDisplay}: ${train.departureTimeFromOrigin}</span>
-                            <span>Llegada a Portugalete: ${train.arrivalTimeAtPortugalete} (en ${formatTime(train.timeToArrivalAtPortugalete, train.arrivalTimeAtPortugalete)}) ${correspondenceMessage}</span>
+                            <span>Llegada a ${destinationStationNameForDisplay}: ${train.arrivalTimeAtDestination} (en ${formatTime(train.timeToArrivalAtDestination, train.departureTimeFromOrigin)}) ${correspondenceMessage}</span>
                         `;
                         metroResultsContainer.appendChild(trainInfoDiv);
                     }
                 });
             } else {
-                const originStationNameForDisplay = metroStations.find(s => s.code === metroStationCode)?.name || metroStationCode;
-                metroResultsContainer.innerHTML = `<h2>Próximos trenes de Metro Bilbao desde ${originStationNameForDisplay} hacia Portugalete</h2><p class="no-results">No se encontraron trenes próximos para esta ruta de Metro Bilbao.</p>`;
+                metroResultsContainer.innerHTML = `<h2>Próximos trenes de Metro Bilbao desde ${originStationNameForDisplay} hacia ${destinationStationNameForDisplay}</h2><p class="no-results">No se encontraron trenes próximos para esta ruta de Metro Bilbao.</p>`;
             }
 
-            // --- Display Bizkaibus data (without correspondence text here) ---
-            if (bizkaibusDepartures.length === 0) {
-                bizkaibusResultsContainer.innerHTML += '<p class="no-results">No se encontraron autobuses Bizkaibus próximos para la parada 450.</p>';
-            } else {
-                const sortedBizkaibus = bizkaibusDepartures.sort((a, b) => a.timeToDeparture - b.timeToDeparture);
-                const nextRelevantBizkaibus = sortedBizkaibus.slice(0, 5); 
+            // --- Display Bizkaibus data with real-time status ---
+            bizkaibusResultsContainer.innerHTML = `<h2>Próximos autobuses Bizkaibus (Parada ${bizkaibusInfo.stopId} - ${bizkaibusInfo.stopName})</h2>`;
 
+            // Note: filteredBizkaibusDepartures is already correctly sorted by time and filtered by line/headsign
+            // The display for Bizkaibus will now just use the already filtered and sorted list.
+
+            if (filteredBizkaibusDepartures.length === 0) { // <--- USE filteredBizkaibusDepartures here too
+                bizkaibusResultsContainer.innerHTML += `<p class="no-results">No se encontraron autobuses Bizkaibus próximos para la parada ${bizkaibusInfo.stopId} y los destinos configurados.</p>`;
+            } else {
+
+                const now = new Date();
+                const nowInMinutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+
+                // ✅ Filtrar los buses que aún no han salido (o como mucho hace 1 minuto)
+                const nextRelevantBizkaibus = filteredBizkaibusDepartures
+                    .filter(bus => {
+                        if (typeof bus.estimatedDepartureMinutes !== 'number' || isNaN(bus.estimatedDepartureMinutes)) return true;
+                        return bus.estimatedDepartureMinutes >= nowInMinutes - 1;
+                    })
+                    .slice(0, 5);
+
+                // ✅ Pintar los buses filtrados
                 nextRelevantBizkaibus.forEach(bus => {
                     const busInfoDiv = document.createElement('div');
                     busInfoDiv.classList.add('bus-info');
+
+                    let realTimeStatus = '';
+                    if (typeof bus.delayMinutes === 'number') {
+                        if (Math.abs(bus.delayMinutes) <= 2.5) {
+                            realTimeStatus = `<span class="bus-status-ontime">En hora</span>`;
+                        } else if (bus.delayMinutes > 2.5) {
+                            realTimeStatus = `<span class="bus-status-late">Retrasado por ${Math.round(bus.delayMinutes)} min.</span>`;
+                        } else {
+                            realTimeStatus = `<span class="bus-status-early">Adelantado por ${Math.round(Math.abs(bus.delayMinutes))} min.</span>`;
+                        }
+                    } else {
+                        realTimeStatus = `<span class="bus-status-unknown">Sin datos en tiempo real (teórico)</span>`;
+                    }
+                    const realTimeBus = bizkaibusRealTimeData.find(rt => rt.tripId === bus.tripId && rt.routeId === bus.routeId);
+
+                    // Calcular la hora estimada para mostrar
+                    const baseMinutes = convertTimeToMinutes(bus.departureTime.split(':').slice(0, 2).join(':'));
+                    const estimatedMinutes = bus.delayMinutes !== undefined ? baseMinutes + bus.delayMinutes : baseMinutes;
+                    const estimatedTimeHHMM = formatMinutesToHHMM(estimatedMinutes);
+
+                    // Calcular tiempo hasta salida
+                    const timeToDeparture = estimatedMinutes - nowInMinutes;
+
                     busInfoDiv.innerHTML = `
-                        <strong>Bizkaibus hacia ${bus.headsign}</strong>
-                        <span>Salida: ${bus.departureTime} (en ${formatTime(bus.timeToDeparture, bus.departureTime)})</span>
+                        <strong>Bizkaibus ${bus.routeId} hacia ${bus.headsign}</strong>
+                        <span>Salida: ${bus.departureTime} (en ${formatTime(timeToDeparture)}) (aprox. ${estimatedTimeHHMM})</span>
+                        <span>Estado: ${realTimeStatus}</span>
                     `;
+
                     bizkaibusResultsContainer.appendChild(busInfoDiv);
                 });
             }
@@ -484,10 +766,10 @@
 
         function formatTime(timeEstimated, timeRounded) {
             const formatMinutesToText = (minutes) => {
-                if (minutes < -2) { 
+                if (minutes < -2) {
                     return 'Pasado';
-                } else if (minutes <= 0) { 
-                    return 'Parada';
+                } else if (minutes <= 0) {
+                    return 'En parada'; // Cambiado de 'Llegada'
                 } else if (minutes === 1) {
                     return '1 minuto';
                 } else if (minutes < 60) {
@@ -502,23 +784,45 @@
             const estimatedText = formatMinutesToText(timeEstimated);
 
             let displayRoundedTime = 'N/A';
+            // Se asegura que timeRounded sea una cadena antes de intentar procesarla
             if (typeof timeRounded === 'string' && timeRounded.trim() !== '') {
                 const parts = timeRounded.split(':');
-                if (parts.length === 3) { // If format is HH:MM:SS
+                if (parts.length === 3) { // Si el formato es HH:MM:SS
                     const totalMinutes = convertTimeToMinutes(timeRounded);
                     displayRoundedTime = formatMinutesToHHMM(totalMinutes);
-                } else { // Assume it's already HH:MM or doesn't need rounding
+                } else { // Asume que ya está en HH:MM o no necesita redondeo
                     displayRoundedTime = timeRounded.trim();
                 }
             }
 
-            return `${estimatedText} (aprox. ${displayRoundedTime})`;
+            return `${estimatedText}`;
         }
 
-        // Initial data load and dropdown population when the page loads
+        // Manejo de la carga inicial y actualizaciones en tiempo real
         document.addEventListener('DOMContentLoaded', () => {
             populateMetroStationsDropdown();
-            loadBizkaibusData();
+            
+            loadBizkaibusData().then(() => {
+                // Configura la actualización en tiempo real de Bizkaibus
+                // Llama inmediatamente para la parada por defecto y luego cada 30 segundos
+                if (realTimeFetchInterval) {
+                    clearInterval(realTimeFetchInterval);
+                }
+                fetchAndProcessRealTimeBizkaibusData(); 
+                realTimeFetchInterval = setInterval(fetchAndProcessRealTimeBizkaibusData, 30000); 
+
+                // Configura el listener para cambios en la selección de parada de Bizkaibus
+                document.getElementById('bizkaibusDestinationStation').addEventListener('change', () => {
+                    // Limpia cualquier intervalo existente
+                    if (realTimeFetchInterval) {
+                        clearInterval(realTimeFetchInterval);
+                    }
+                    // Obtiene y muestra los datos inmediatamente para la nueva selección
+                    fetchAndProcessRealTimeBizkaibusData();
+                    // Establece un nuevo intervalo para la nueva selección
+                    realTimeFetchInterval = setInterval(fetchAndProcessRealTimeBizkaibusData, 30000);
+                });
+            });
         });
     </script>
 </body>
