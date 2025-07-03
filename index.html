@@ -584,31 +584,50 @@
                     );
 
                     if (theoreticalStopTimeEntry) {
-                        const theoreticalTimeStr = theoreticalStopTimeEntry.departure_time;
-                        const theoreticalDate = new Date();
-                        let [h, m, s] = theoreticalTimeStr.split(':').map(Number);
-                        if (h >= 24) {
-                            h = h % 24;
-                            theoreticalDate.setDate(theoreticalDate.getDate() + 1);
+                        const stopsForTrip = bizkaibusStopTimesData.filter(st => st.trip_id === realTimeBus.tripId);
+
+                        // Buscar la primera parada (stop_sequence === '1')
+                        const originStop = stopsForTrip.find(st => st.stop_sequence === '1');
+
+                        if (originStop) {
+                            const originTimeStr = originStop.departure_time;
+                            const [h, m, s] = originTimeStr.split(':').map(Number);
+                            const originTime = new Date(realTimeBus.recordedAtTime);
+                            
+                            if (h >= 24) {
+                                originTime.setDate(originTime.getDate() + 1);
+                            }
+                            originTime.setHours(h % 24, m, s || 0, 0);
+
+                            const now = realTimeBus.recordedAtTime;
+                            const diffMinutes = (now - originTime) / 60000;
+
+                            // Solo calculamos delay si ya ha salido de la parada de origen
+                            if (diffMinutes >= 0) {
+                                const theoreticalTimeStr = theoreticalStopTimeEntry.departure_time;
+                                const theoreticalDate = new Date(now);
+                                let [ht, mt, st_] = theoreticalTimeStr.split(':').map(Number);
+                                if (ht >= 24) {
+                                    theoreticalDate.setDate(theoreticalDate.getDate() + 1);
+                                }
+                                theoreticalDate.setHours(ht % 24, mt, st_ || 0, 0);
+
+                                let delayMinutes = (now - theoreticalDate) / 60000;
+
+                                if (delayMinutes > 720) delayMinutes -= 1440;
+                                if (delayMinutes < -720) delayMinutes += 1440;
+
+                                bus.delayMinutes = delayMinutes;
+
+                                const baseMinutes = convertTimeToMinutes(bus.departureTime.split(':').slice(0, 2).join(':'));
+                                bus.estimatedDepartureMinutes = baseMinutes + delayMinutes;
+                            } else {
+                                // Aún no ha salido del origen, mostrar en hora
+                                bus.delayMinutes = 0;
+                                const baseMinutes = convertTimeToMinutes(bus.departureTime.split(':').slice(0, 2).join(':'));
+                                bus.estimatedDepartureMinutes = baseMinutes;
+                            }
                         }
-                        theoreticalDate.setHours(h, m, s, 0);
-
-                        const realTimeDate = realTimeBus.recordedAtTime;
-                        let delayMinutes = (realTimeDate.getTime() - theoreticalDate.getTime()) / 60000;
-
-                        // Ignorar si aún no ha salido de origen
-                        if (delayMinutes < 0) {
-                            bus.delayMinutes = 0; // No se aplica adelanto aún
-                        } else {
-                            if (delayMinutes > 720) delayMinutes -= 1440;
-                            if (delayMinutes < -720) delayMinutes += 1440;
-
-                            bus.delayMinutes = delayMinutes;
-                        }
-
-                        const cleanTime = bus.departureTime.split(':').slice(0, 2).join(':');
-                        const baseMinutes = convertTimeToMinutes(cleanTime);
-                        bus.estimatedDepartureMinutes = baseMinutes + delayMinutes;
                     }
                 } else {
                     // Si no hay tiempo real, usar hora teórica como estimada
@@ -666,6 +685,9 @@
                                 return true;
                             } else if (timeDifferenceMetroBus >= 0.5 && timeDifferenceMetroBus < 2) {
                                 correspondenceMessage = `<span class="correspondencejusta-text">Enlace justo</span>`;
+                                return true;
+                            } else if (timeDifferenceMetroBus > 10 && timeDifferenceMetroBus <= 15) {
+                                correspondenceMessage = `<span class="correspondence-text">Enlace largo</span>`;
                                 return true;
                             }
 
