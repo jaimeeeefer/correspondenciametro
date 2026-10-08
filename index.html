@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Correspondencia Metro Bilbao y Bizkaibus</title>
+    <meta name="theme-color" content="#d10000">
+    <meta name="description" content="Correspondencias entre Metro Bilbao y Bizkaibus en tiempo real">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
+    <link rel="apple-touch-icon" href="img/icon-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Metro+Bizkaibus">
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -156,6 +164,13 @@
             font-size: 1.2em;
             color: #d10000;
         }
+        .data-source {
+            text-align: center;
+            font-size: 12px;
+            color: #888;
+            margin: 15px 0 0;
+        }
+        .data-source.warn { color: #b36b00; }
     </style>
 </head>
 <body>
@@ -184,6 +199,7 @@
         <div class="results-container" id="bizkaibusResults">
             <p class="loading">Esperando selección de estación de Bizkaibus...</p>
         </div>
+        <p class="data-source" id="dataSourceInfo"></p>
     </div>
 
     <script>
@@ -260,11 +276,28 @@
             }
         };
 
-        // URLs para los datos de Bizkaibus. Se usa stop_times2.txt para Bagatza y Gurutzeta.
-        const bizkaibusStopTimesUrl = 'https://dl.rix.dev/bizkaibus/stop_times2.txt';
-        const bizkaibusCalendarUrl = 'https://dl.rix.dev/bizkaibus/calendar.txt';
-        const bizkaibusCalendarDatesUrl = 'https://dl.rix.dev/bizkaibus/calendar_dates.txt';
-        const bizkaibusTripsUrl = 'https://dl.rix.dev/bizkaibus/trips.txt';
+        // Si los datos de RIX llevan sin actualizarse más de estos días, se usan los de GitHub.
+        const MAX_DATA_AGE_DAYS = 30;
+
+        // Fuente principal: RIX
+        const RIX_URLS = {
+            stopTimes:     'https://dl.rix.dev/bizkaibus/stop_times2.txt',
+            calendar:      'https://dl.rix.dev/bizkaibus/calendar.txt',
+            calendarDates: 'https://dl.rix.dev/bizkaibus/calendar_dates.txt',
+            trips:         'https://dl.rix.dev/bizkaibus/trips.txt'
+        };
+
+        // Fuente de respaldo: GitHub
+        const STOP_TIMES2_URL = "https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/datos/stop_times2.txt";
+        const CALENDAR_URL = "https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/datos/calendar.txt";
+        const CALENDAR_DATES_URL = "https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/datos/calendar_dates.txt";
+        const TRIPS_URL = "https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/datos/trips.txt";
+        const GITHUB_URLS = {
+            stopTimes:     STOP_TIMES2_URL,
+            calendar:      CALENDAR_URL,
+            calendarDates: CALENDAR_DATES_URL,
+            trips:         TRIPS_URL
+        };
 
         const metroBilbaoApiBaseUrl = 'https://api.metrobilbao.eus/metro/real-time';
         const bizkaibusRealTimeApiUrl = 'https://info-bizkaibus.jaimeferni10.workers.dev/'; // Nueva API para tiempo real
@@ -279,20 +312,116 @@
             });
         }
 
+        // Descarga los 4 ficheros de un origen. Devuelve los textos y la antigüedad (días) del más antiguo,
+        // según la cabecera Last-Modified (null si el servidor no la envía).
+        async function fetchDataSet(urls) {
+            const keys = ['stopTimes', 'calendar', 'calendarDates', 'trips'];
+            const responses = await Promise.all(keys.map(k => fetch(urls[k], { cache: 'no-cache' })));
+
+            responses.forEach(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status} en ${r.url}`);
+            });
+
+            const texts = await Promise.all(responses.map(r => r.text()));
+            texts.forEach((t, i) => {
+                // Evita aceptar páginas de error HTML o ficheros vacíos
+                if (!t.trim() || t.trim().startsWith('<')) {
+                    throw new Error(`Contenido no válido en ${responses[i].url}`);
+                }
+            });
+
+            let oldestAgeDays = null;
+            responses.forEach(r => {
+                const lm = r.headers.get('Last-Modified');
+                if (lm) {
+                    const ts = new Date(lm).getTime();
+                    if (!isNaN(ts)) {
+                        const age = (Date.now() - ts) / 86400000;
+                        if (oldestAgeDays === null || age > oldestAgeDays) oldestAgeDays = age;
+                    }
+                }
+            });
+
+            const data = {
+                stopTimes: parseCSV(texts[0]),
+                calendar: parseCSV(texts[1]),
+                calendarDates: parseCSV(texts[2]),
+                trips: parseCSV(texts[3])
+            };
+            return { data, ageDays: oldestAgeDays };
+        }
+
+        // ¿El calendario ya no cubre la fecha de hoy? (end_date máxima anterior a hoy)
+        function isCalendarExpired(calendar) {
+            const now = new Date();
+            const today = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+            const maxEnd = Math.max(...calendar.map(s => parseInt(s.end_date) || 0));
+            return maxEnd < today;
+        }
+
+        function applyBizkaibusData(data) {
+            bizkaibusStopTimesData = data.stopTimes;
+            bizkaibusCalendarData = data.calendar;
+            bizkaibusCalendarDatesData = data.calendarDates;
+            bizkaibusTripsData = data.trips;
+        }
+
+        function setDataSourceInfo(text, warn) {
+            const el = document.getElementById('dataSourceInfo');
+            if (!el) return;
+            el.textContent = text;
+            el.classList.toggle('warn', !!warn);
+        }
+
         async function loadBizkaibusData() {
             try {
-                // Fetch common Bizkaibus data (stop_times, calendar, trips) once
-                const [stopTimesResponse, calendarResponse, calendarDatesResponse, tripsResponse] = await Promise.all([
-                    fetch(bizkaibusStopTimesUrl),
-                    fetch(bizkaibusCalendarUrl),
-                    fetch(bizkaibusCalendarDatesUrl),
-                    fetch(bizkaibusTripsUrl)
-                ]);
+                let rix = null;
+                let rixProblem = null;
 
-                bizkaibusStopTimesData = parseCSV(await stopTimesResponse.text());
-                bizkaibusCalendarData = parseCSV(await calendarResponse.text());
-                bizkaibusCalendarDatesData = parseCSV(await calendarDatesResponse.text());
-                bizkaibusTripsData = parseCSV(await tripsResponse.text());
+                // 1) Intentar con RIX
+                try {
+                    rix = await fetchDataSet(RIX_URLS);
+                    if (rix.ageDays !== null && rix.ageDays > MAX_DATA_AGE_DAYS) {
+                        rixProblem = `sin actualizar desde hace ${Math.floor(rix.ageDays)} días`;
+                    } else if (isCalendarExpired(rix.data.calendar)) {
+                        rixProblem = 'el calendario ha caducado';
+                    }
+                } catch (e) {
+                    console.warn('RIX no disponible:', e);
+                    rixProblem = 'no disponible';
+                }
+
+                let source;
+                if (!rixProblem) {
+                    applyBizkaibusData(rix.data);
+                    source = 'RIX';
+                    setDataSourceInfo(
+                        rix.ageDays !== null
+                            ? `Datos teóricos: RIX (actualizados hace ${Math.floor(rix.ageDays)} días)`
+                            : 'Datos teóricos: RIX',
+                        false
+                    );
+                } else {
+                    // 2) Respaldo: GitHub
+                    console.warn(`Usando GitHub como respaldo (RIX: ${rixProblem})`);
+                    try {
+                        const gh = await fetchDataSet(GITHUB_URLS);
+                        applyBizkaibusData(gh.data);
+                        source = 'GitHub';
+                        setDataSourceInfo(`Datos teóricos: GitHub (RIX ${rixProblem})`, true);
+                    } catch (ghError) {
+                        console.error('GitHub tampoco disponible:', ghError);
+                        if (rix) {
+                            // RIX respondió pero estaba desactualizado: mejor eso que nada
+                            applyBizkaibusData(rix.data);
+                            source = 'RIX (desactualizado)';
+                            setDataSourceInfo(`Datos teóricos: RIX (${rixProblem}) y GitHub no disponible`, true);
+                        } else {
+                            throw ghError;
+                        }
+                    }
+                }
+                console.log('Datos estáticos de Bizkaibus cargados desde:', source);
 
                 // Initial messages after loading common Bizkaibus data
                 document.getElementById('metroResults').innerHTML = '<p style="text-align: center;">Datos de Bizkaibus cargados. Selecciona una estación de Metro para buscar.</p>';
@@ -300,6 +429,7 @@
 
             } catch (error) {
                 console.error('Error loading static Bizkaibus data:', error);
+                setDataSourceInfo('No se pudieron cargar los datos teóricos (ni RIX ni GitHub)', true);
                 document.getElementById('metroResults').innerHTML = '<p class="error-message">Error al cargar datos estáticos de Bizkaibus. Inténtalo de nuevo más tarde.</p>';
                 document.getElementById('bizkaibusResults').innerHTML = '<p class="error-message">Error al cargar datos estáticos de Bizkaibus.</p>';
             }
@@ -823,6 +953,13 @@
             }
 
             return `${estimatedText}`;
+        }
+
+        // PWA: registrar el service worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW no registrado:', err));
+            });
         }
 
         // Manejo de la carga inicial y actualizaciones en tiempo real
