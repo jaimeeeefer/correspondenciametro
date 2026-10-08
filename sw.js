@@ -1,6 +1,6 @@
 // Service worker de Metro+Bizkaibus
 // Sube el número de versión cuando cambies index.html para forzar la actualización.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `shell-${VERSION}`;
 const DATA_CACHE = `data-${VERSION}`;
 
