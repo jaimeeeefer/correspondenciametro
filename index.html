@@ -215,6 +215,54 @@
             font-size: 1.05rem;
             font-variant-numeric: tabular-nums;
         }
+        /* Línea de tiempo del trayecto: salidas destacadas, llegadas secundarias */
+        .steps {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            margin-top: 6px;
+            padding-left: 20px;
+        }
+        .steps::before {
+            content: "";
+            position: absolute;
+            left: 5px;
+            top: 12px;
+            bottom: 12px;
+            width: 2px;
+            background: var(--line);
+        }
+        .steps .card-row { position: relative; }
+        .steps .card-row::before {
+            content: "";
+            position: absolute;
+            left: -20px;
+            top: 50%;
+            width: 8px;
+            height: 8px;
+            margin-top: -5px;
+            border-radius: 50%;
+            box-sizing: content-box;
+            background: var(--red);
+            border: 1px solid var(--red);
+        }
+        .steps .card-row-dep > span { color: var(--text); font-weight: 600; }
+        /* Las llegadas son información secundaria: más pequeñas y atenuadas, con punto hueco */
+        .steps .card-row-arrival { font-size: 0.78rem; }
+        .steps .card-row-arrival::before {
+            background: var(--card-2);
+            border-color: var(--muted);
+            width: 6px;
+            height: 6px;
+            left: -19px;
+            margin-top: -4px;
+        }
+        .steps .card-row-arrival b {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--muted);
+        }
         .badge {
             padding: 2px 9px;
             border-radius: 999px;
@@ -677,7 +725,24 @@
                 const arrivalAtTransferMinutes = departureMinutes + leg1.trip.duration;
 
                 const nextTrain = secondLegDepartures.find(t => t.minutes >= arrivalAtTransferMinutes);
-                if (!nextTrain) return; // no hay un segundo tren al que llegar a tiempo
+                if (!nextTrain) {
+                    // La API aún no conoce los trenes de SIN a esa hora: se muestra solo la llegada a SIN
+                    result.push({
+                        departureTimeFromOrigin: train.timeRounded,
+                        arrivalTimeAtDestination: null,
+                        line: leg1.trip.line,
+                        destination: transferStationName,
+                        // Solo se usa para ordenar y descartar trenes pasados (estimación mínima)
+                        timeToArrivalAtDestination: arrivalAtTransferMinutes + leg2.trip.duration - currentTimeInMinutes,
+                        arrivalTimeAtDestinationMinutes: null,
+                        transfer: {
+                            pending: true,
+                            stationName: transferStationName,
+                            arrivalTime: formatMinutesToHHMM(arrivalAtTransferMinutes)
+                        }
+                    });
+                    return;
+                }
 
                 const arrivalAtDestinationMinutes = nextTrain.minutes + leg2.trip.duration;
                 result.push({
@@ -1038,7 +1103,7 @@
 
                         let correspondenceMessage = '';
                         // NOW USE filteredBizkaibusDepartures for the correspondence check
-                        const hasCorrespondence = filteredBizkaibusDepartures.some(bus => {
+                        const hasCorrespondence = !(train.transfer && train.transfer.pending) && filteredBizkaibusDepartures.some(bus => {
                             const cleanBusTime = bus.departureTime.split(':').slice(0, 2).join(':');
                             let estimatedBusTime = convertTimeToMinutes(cleanBusTime);
                             if (typeof bus.delayMinutes === 'number') {
@@ -1067,15 +1132,24 @@
                         });
 
                         const tr = train.transfer;
-                        const rows = tr ? `
-                            <div class="card-row"><span>Salida de ${originStationNameForDisplay}</span><b>${train.departureTimeFromOrigin}</b></div>
-                            <div class="card-row"><span>Llegada a ${tr.stationName} (transbordo)</span><b>${tr.arrivalTime}</b></div>
-                            <div class="card-row"><span>Salida de ${tr.stationName} · Línea ${tr.line2} (espera ${tr.waitMinutes} min)</span><b>${tr.departureTime}</b></div>
-                            <div class="card-row"><span>Llegada a ${destinationStationNameForDisplay} (en ${formatTime(train.timeToArrivalAtDestination, train.departureTimeFromOrigin)})</span><b>${train.arrivalTimeAtDestination}</b></div>
-                        ` : `
-                            <div class="card-row"><span>Salida de ${originStationNameForDisplay}</span><b>${train.departureTimeFromOrigin}</b></div>
-                            <div class="card-row"><span>Llegada a ${destinationStationNameForDisplay} (en ${formatTime(train.timeToArrivalAtDestination, train.departureTimeFromOrigin)})</span><b>${train.arrivalTimeAtDestination}</b></div>
-                        `;
+                        const depRow = (label, time) => `<div class="card-row card-row-dep"><span>${label}</span><b>${time}</b></div>`;
+                        const arrRow = (label, time) => `<div class="card-row card-row-arrival"><span>${label}</span><b>${time}</b></div>`;
+                        const finalArrival = arrRow(`Llegada a ${destinationStationNameForDisplay} (en ${formatTime(train.timeToArrivalAtDestination, train.departureTimeFromOrigin)})`, train.arrivalTimeAtDestination);
+
+                        let rows;
+                        if (tr && tr.pending) {
+                            // Aún sin previsión del tren de San Ignazio: solo hasta la llegada al transbordo
+                            rows = depRow(`Salida de ${originStationNameForDisplay}`, train.departureTimeFromOrigin)
+                                 + arrRow(`Llegada a ${tr.stationName}`, tr.arrivalTime);
+                        } else if (tr) {
+                            rows = depRow(`Salida de ${originStationNameForDisplay}`, train.departureTimeFromOrigin)
+                                 + arrRow(`Llegada a ${tr.stationName} (transbordo)`, tr.arrivalTime)
+                                 + depRow(`Salida de ${tr.stationName} · Línea ${tr.line2} (espera ${tr.waitMinutes} min)`, tr.departureTime)
+                                 + finalArrival;
+                        } else {
+                            rows = depRow(`Salida de ${originStationNameForDisplay}`, train.departureTimeFromOrigin)
+                                 + finalArrival;
+                        }
 
                         trainInfoDiv.innerHTML = `
                             <div class="card-head">
@@ -1084,7 +1158,7 @@
                                 ${tr ? '<span class="transfer-text">Transbordo</span>' : ''}
                                 ${correspondenceMessage}
                             </div>
-                            ${rows}
+                            <div class="steps">${rows}</div>
                         `;
                         metroBuffer.appendChild(trainInfoDiv);
                     }
