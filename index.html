@@ -215,15 +215,51 @@
             font-size: 1.05rem;
             font-variant-numeric: tabular-nums;
         }
-        /* Las llegadas son información secundaria: más pequeñas, atenuadas y sangradas */
-        .card-row-arrival {
-            font-size: 0.8rem;
-            padding-left: 12px;
-            border-left: 2px solid var(--line);
+        /* Línea de tiempo del trayecto: salidas destacadas, llegadas secundarias */
+        .steps {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            margin-top: 6px;
+            padding-left: 20px;
         }
-        .card-row-arrival b {
-            font-size: 0.88rem;
-            font-weight: 600;
+        .steps::before {
+            content: "";
+            position: absolute;
+            left: 5px;
+            top: 12px;
+            bottom: 12px;
+            width: 2px;
+            background: var(--line);
+        }
+        .steps .card-row { position: relative; }
+        /* Los puntos se centran exactamente sobre la línea (centro de la línea = 6px del contenedor) */
+        .steps .card-row::before {
+            content: "";
+            position: absolute;
+            left: -14px;
+            top: 50%;
+            width: 10px;
+            height: 10px;
+            box-sizing: border-box;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            background: var(--red);
+            border: 1px solid var(--red);
+        }
+        .steps .card-row-dep > span { color: var(--text); font-weight: 600; }
+        /* Las llegadas son información secundaria: más pequeñas y atenuadas, con punto hueco */
+        .steps .card-row-arrival { font-size: 0.78rem; }
+        .steps .card-row-arrival::before {
+            background: var(--card-2);
+            border: 1.5px solid var(--muted);
+            width: 8px;
+            height: 8px;
+        }
+        .steps .card-row-arrival b {
+            font-size: 0.84rem;
+            font-weight: 500;
             color: var(--muted);
         }
         .badge {
@@ -1095,7 +1131,7 @@
                         });
 
                         const tr = train.transfer;
-                        const depRow = (label, time) => `<div class="card-row"><span>${label}</span><b>${time}</b></div>`;
+                        const depRow = (label, time) => `<div class="card-row card-row-dep"><span>${label}</span><b>${time}</b></div>`;
                         const arrRow = (label, time) => `<div class="card-row card-row-arrival"><span>${label}</span><b>${time}</b></div>`;
                         const finalArrival = arrRow(`Llegada a ${destinationStationNameForDisplay} (en ${formatTime(train.timeToArrivalAtDestination, train.departureTimeFromOrigin)})`, train.arrivalTimeAtDestination);
 
@@ -1103,7 +1139,7 @@
                         if (tr && tr.pending) {
                             // Aún sin previsión del tren de San Ignazio: solo hasta la llegada al transbordo
                             rows = depRow(`Salida de ${originStationNameForDisplay}`, train.departureTimeFromOrigin)
-                                 + arrRow(`Llegada a ${tr.stationName} (transbordo)`, tr.arrivalTime);
+                                 + arrRow(`Llegada a ${tr.stationName}`, tr.arrivalTime);
                         } else if (tr) {
                             rows = depRow(`Salida de ${originStationNameForDisplay}`, train.departureTimeFromOrigin)
                                  + arrRow(`Llegada a ${tr.stationName} (transbordo)`, tr.arrivalTime)
@@ -1121,7 +1157,7 @@
                                 ${tr ? '<span class="transfer-text">Transbordo</span>' : ''}
                                 ${correspondenceMessage}
                             </div>
-                            ${rows}
+                            <div class="steps">${rows}</div>
                         `;
                         metroBuffer.appendChild(trainInfoDiv);
                     }
