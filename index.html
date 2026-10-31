@@ -215,13 +215,6 @@
             font-size: 1.05rem;
             font-variant-numeric: tabular-nums;
         }
-        /* Salida teórica de un bus localizado en tiempo real: secundaria (pequeña y en gris, como las llegadas del metro) */
-        .card-row-secondary { font-size: 0.78rem; }
-        .card-row-secondary b {
-            font-size: 0.84rem;
-            font-weight: 500;
-            color: var(--muted);
-        }
         /* Línea de tiempo del trayecto: salidas destacadas, llegadas secundarias */
         .steps {
             position: relative;
@@ -255,19 +248,22 @@
             background: var(--red);
             border: 1px solid var(--red);
         }
-        .steps .card-row-dep > span { color: var(--text); font-weight: 600; }
+        /* Estilo único de filas, compartido por las tarjetas de metro y de bus:
+           principal (card-row-dep) = etiqueta oscura en seminegrita + hora grande;
+           secundaria (card-row-arrival / card-row-secondary) = todo pequeño y en gris */
+        .card-row-dep > span { color: var(--text); font-weight: 600; }
+        .card-row-arrival, .card-row-secondary { font-size: 0.78rem; }
+        .card-row-arrival b, .card-row-secondary b {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--muted);
+        }
         /* Las llegadas son información secundaria: más pequeñas y atenuadas, con punto hueco */
-        .steps .card-row-arrival { font-size: 0.78rem; }
         .steps .card-row-arrival::before {
             background: var(--card-2);
             border: 1.5px solid var(--muted);
             width: 8px;
             height: 8px;
-        }
-        .steps .card-row-arrival b {
-            font-size: 0.84rem;
-            font-weight: 500;
-            color: var(--muted);
         }
         .badge {
             padding: 2px 9px;
@@ -1282,11 +1278,13 @@
                     // Con el bus localizado en tiempo real, la hora estimada manda y la teórica pasa a segundo plano
                     const scheduledHHMM = bus.departureTime.split(':').slice(0, 2).join(':');
                     const isLocated = typeof bus.delayMinutes === 'number';
+                    const depRowBus = (label, time) => `<div class="card-row card-row-dep"><span>${label}</span><b>${time}</b></div>`;
+                    const secRowBus = (label, time) => `<div class="card-row card-row-secondary"><span>${label}</span><b>${time}</b></div>`;
                     const timeRows = isLocated
-                        ? `<div class="card-row card-row-secondary"><span>Salida teórica</span><b>${scheduledHHMM}</b></div>
-                        <div class="card-row"><span>Hora estimada (en ${formatTime(timeToDeparture)})</span><b>${estimatedTimeHHMM}</b></div>`
-                        : `<div class="card-row"><span>Salida teórica (en ${formatTime(timeToDeparture)})</span><b>${scheduledHHMM}</b></div>
-                        <div class="card-row"><span>Hora estimada</span><b>${estimatedTimeHHMM}</b></div>`;
+                        ? secRowBus('Salida teórica', scheduledHHMM)
+                          + depRowBus(`Hora estimada (en ${formatTime(timeToDeparture)})`, estimatedTimeHHMM)
+                        : depRowBus(`Salida teórica (en ${formatTime(timeToDeparture)})`, scheduledHHMM)
+                          + depRowBus('Hora estimada', estimatedTimeHHMM);
 
                     busInfoDiv.innerHTML = `
                         <div class="card-head">
