@@ -215,6 +215,13 @@
             font-size: 1.05rem;
             font-variant-numeric: tabular-nums;
         }
+        /* Salida teórica de un bus localizado en tiempo real: secundaria (pequeña y en gris, como las llegadas del metro) */
+        .card-row-secondary { font-size: 0.78rem; }
+        .card-row-secondary b {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--muted);
+        }
         /* Línea de tiempo del trayecto: salidas destacadas, llegadas secundarias */
         .steps {
             position: relative;
@@ -374,6 +381,10 @@
 
         // Variable global para almacenar los datos en tiempo real de Bizkaibus
         let bizkaibusRealTimeData = [];
+
+        // Paradas (con coordenadas) y horarios agrupados por viaje, para estimar el retraso de cada bus
+        let bizkaibusStopsData = new Map();         // stop_id -> { stop_lat, stop_lon }
+        let bizkaibusStopTimesByTrip = new Map();   // trip_id -> filas de stop_times ordenadas por stop_sequence
         let realTimeFetchInterval = null; // Para controlar el intervalo de actualización
         let latestRenderToken = 0; // Evita que una respuesta antigua pise a una más reciente
 
@@ -482,7 +493,8 @@
             stopTimes:     'https://dl.rix.dev/bizkaibus/stop_times1.txt',
             calendar:      'https://dl.rix.dev/bizkaibus/calendar.txt',
             calendarDates: 'https://dl.rix.dev/bizkaibus/calendar_dates.txt',
-            trips:         'https://dl.rix.dev/bizkaibus/trips.txt'
+            trips:         'https://dl.rix.dev/bizkaibus/trips.txt',
+            stops:         'https://dl.rix.dev/bizkaibus/stops.txt'
         };
 
         // Fuente de respaldo: GitHub
@@ -490,11 +502,13 @@
         const CALENDAR_URL = "https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/datos/calendar.txt";
         const CALENDAR_DATES_URL = "https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/datos/calendar_dates.txt";
         const TRIPS_URL = "https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/datos/trips.txt";
+        const STOPS_URL = "https://raw.githubusercontent.com/jaimeeeefer/bizkaibus/refs/heads/main/datos/stops.txt";
         const GITHUB_URLS = {
             stopTimes:     STOP_TIMES1_URL,
             calendar:      CALENDAR_URL,
             calendarDates: CALENDAR_DATES_URL,
-            trips:         TRIPS_URL
+            trips:         TRIPS_URL,
+            stops:         STOPS_URL
         };
 
         const metroBilbaoApiBaseUrl = 'https://api.metrobilbao.eus/metro/real-time';
@@ -513,7 +527,7 @@
         // Descarga los 4 ficheros de un origen. Devuelve los textos y la antigüedad (días) del más antiguo,
         // según la cabecera Last-Modified (null si el servidor no la envía).
         async function fetchDataSet(urls) {
-            const keys = ['stopTimes', 'calendar', 'calendarDates', 'trips'];
+            const keys = ['stopTimes', 'calendar', 'calendarDates', 'trips', 'stops'];
             const responses = await Promise.all(keys.map(k => fetch(urls[k], { cache: 'no-cache' })));
 
             responses.forEach(r => {
@@ -544,7 +558,8 @@
                 stopTimes: parseCSV(texts[0]),
                 calendar: parseCSV(texts[1]),
                 calendarDates: parseCSV(texts[2]),
-                trips: parseCSV(texts[3])
+                trips: parseCSV(texts[3]),
+                stops: parseCSV(texts[4])
             };
             return { data, ageDays: oldestAgeDays };
         }
@@ -562,6 +577,30 @@
             bizkaibusCalendarData = data.calendar;
             bizkaibusCalendarDatesData = data.calendarDates;
             bizkaibusTripsData = data.trips;
+
+            // Coordenadas de las paradas
+            bizkaibusStopsData = new Map();
+            data.stops.forEach(s => {
+                const lat = parseFloat(s.stop_lat);
+                const lon = parseFloat(s.stop_lon);
+                if (s.stop_id && !isNaN(lat) && !isNaN(lon)) {
+                    bizkaibusStopsData.set(s.stop_id, { stop_lat: lat, stop_lon: lon });
+                }
+            });
+
+            // Horarios agrupados por viaje y ordenados por stop_sequence
+            bizkaibusStopTimesByTrip = new Map();
+            data.stopTimes.forEach(st => {
+                let rows = bizkaibusStopTimesByTrip.get(st.trip_id);
+                if (!rows) {
+                    rows = [];
+                    bizkaibusStopTimesByTrip.set(st.trip_id, rows);
+                }
+                rows.push(st);
+            });
+            bizkaibusStopTimesByTrip.forEach(rows => {
+                rows.sort((a, b) => parseInt(a.stop_sequence) - parseInt(b.stop_sequence));
+            });
         }
 
         function setDataSourceInfo(text, warn) {
@@ -675,6 +714,82 @@
             const hours = Math.floor(minutesTotal / 60);
             const minutes = Math.round(minutesTotal % 60);
             return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        }
+
+        // ─── Estimación del retraso: misma lógica que la página de Bizkaibus ───
+        function timeToSeconds(t) {
+            if (!t || !/^\d{2}:\d{2}:\d{2}$/.test(t)) return 0;
+            const [h, m, s] = t.split(':');
+            return +h * 3600 + +m * 60 + +s;
+        }
+
+        function haversineMetres(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+            return R * 2 * Math.asin(Math.sqrt(a));
+        }
+
+        // Retraso (en segundos) del bus respecto al horario, según entre qué dos paradas está y su posición GPS
+        function computeBusDelay(prevStop, nextStop, prevInfo, nextInfo, busLat, busLon, recordedAtISO) {
+            const rt = new Date(recordedAtISO);
+            const actual = rt.getHours() * 3600 + rt.getMinutes() * 60 + rt.getSeconds();
+            const schedDep = timeToSeconds(prevStop ? (prevStop.departure_time || prevStop.arrival_time) : null);
+            const schedArr = timeToSeconds(nextStop.arrival_time || nextStop.departure_time);
+            if (schedArr <= 0) return null;
+
+            if (prevStop && prevInfo && nextInfo && busLat !== null && busLon !== null) {
+                const segDist    = haversineMetres(prevInfo.stop_lat, prevInfo.stop_lon, nextInfo.stop_lat, nextInfo.stop_lon);
+                const distToNext = haversineMetres(busLat, busLon, nextInfo.stop_lat, nextInfo.stop_lon);
+                const segDur     = schedArr - (schedDep > 0 ? schedDep : schedArr);
+                if (segDist > 0 && segDur > 0) {
+                    const fracRemaining = Math.min(1, Math.max(0, distToNext / segDist));
+                    const timeSpent     = (1 - fracRemaining) * segDur;
+                    const estActualDep  = actual - timeSpent;
+                    if (schedDep > 0) return estActualDep - schedDep;
+                    return (actual + fracRemaining * segDur) - schedArr;
+                }
+            }
+            if (busLat !== null && busLon !== null && nextInfo) {
+                const d = haversineMetres(busLat, busLon, nextInfo.stop_lat, nextInfo.stop_lon);
+                if (d < 1000) {
+                    const s = timeToSeconds(nextStop.departure_time || nextStop.arrival_time);
+                    return s > 0 ? actual - s : null;
+                }
+            }
+            return actual - schedArr;
+        }
+
+        // Devuelve el retraso en segundos de un viaje: 0 si aún no ha salido de cabecera,
+        // null si no se puede estimar (sin datos de la parada a la que se dirige, etc.)
+        function estimateTripDelaySeconds(tripId, liveEntry, currentSec) {
+            const allStops = bizkaibusStopTimesByTrip.get(tripId);
+            if (!allStops || allStops.length === 0) return null;
+
+            const firstDep = timeToSeconds(allStops[0].departure_time);
+            if (currentSec < firstDep) return 0;
+
+            const nextIdx = allStops.findIndex(s => s.stop_id === liveEntry.stopPointRef);
+            if (nextIdx === -1 || !liveEntry.recordedAtISO) return null;
+
+            const nextStop = allStops[nextIdx];
+            const prevStop = nextIdx > 0 ? allStops[nextIdx - 1] : undefined;
+            const delay = computeBusDelay(
+                prevStop, nextStop,
+                prevStop ? bizkaibusStopsData.get(prevStop.stop_id) : null,
+                bizkaibusStopsData.get(nextStop.stop_id),
+                liveEntry.lat, liveEntry.lon, liveEntry.recordedAtISO
+            );
+            return (delay === null || isNaN(delay)) ? null : delay;
+        }
+
+        // Hora estimada en HH:MM (se trunca el minuto, igual que en la página de Bizkaibus)
+        function formatEstimatedTime(minutesTotal) {
+            if (typeof minutesTotal !== 'number' || isNaN(minutesTotal)) return 'N/A';
+            const total = Math.floor(minutesTotal + 1e-9);
+            const h = ((Math.floor(total / 60) % 24) + 24) % 24;
+            const m = ((total % 60) + 60) % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
         }
 
         // Estación donde siempre se hace el transbordo de Línea 1 a Línea 2
@@ -800,39 +915,39 @@
                 const parser = new DOMParser();
                 const xmlDoc = parser.parseFromString(text, "application/xml");
 
-                let vehicleActivities = xmlDoc.getElementsByTagName('VehicleActivity');
-                bizkaibusRealTimeData = []; // Clear previous real-time data
+                const vehicleActivities = xmlDoc.getElementsByTagName('VehicleActivity');
+                const rtMap = new Map(); // por viaje; si hay duplicados manda el último
 
                 for (let i = 0; i < vehicleActivities.length; i++) {
                     const activity = vehicleActivities[i];
                     const tripIdElement = activity.getElementsByTagName('VehicleJourneyRef')[0];
                     const recordedAtTimeElement = activity.getElementsByTagName('RecordedAtTime')[0];
                     const monitoredCallElement = activity.getElementsByTagName('MonitoredCall')[0];
+                    const stopPointRefElement =
+                        (monitoredCallElement && monitoredCallElement.getElementsByTagName('StopPointRef')[0]) ||
+                        activity.getElementsByTagName('StopPointRef')[0];
 
-                    if (tripIdElement && recordedAtTimeElement && monitoredCallElement) {
-                        const tripId = tripIdElement.textContent;
-                        const recordedAtTimeStr = recordedAtTimeElement.textContent;
-                        const stopPointRefElement = monitoredCallElement.getElementsByTagName('StopPointRef')[0];
-                        const arrivalStatusElement = monitoredCallElement.getElementsByTagName('ArrivalStatus')[0];
-                        
-                        // NEW: Extract route from trip_id for real-time data as well
-                        let routeIdFromTripId = null;
-                        const match = tripId.match(/trp_([A-Za-z0-9]+)_/);
-                        if (match && match[1]) {
-                            routeIdFromTripId = match[1];
-                        }
-                        
-                        if (stopPointRefElement && arrivalStatusElement && routeIdFromTripId) {
-                            bizkaibusRealTimeData.push({
-                                tripId: tripId,
-                                routeId: routeIdFromTripId, // Use the extracted routeId
-                                recordedAtTime: new Date(recordedAtTimeStr),
-                                stopPointRef: stopPointRefElement.textContent, // The stop where it was recorded
-                                arrivalStatus: arrivalStatusElement.textContent
-                            });
-                        }
-                    }
+                    if (!tripIdElement || !recordedAtTimeElement || !stopPointRefElement) continue;
+
+                    const tripId = tripIdElement.textContent.trim();
+                    const recordedAtISO = recordedAtTimeElement.textContent.trim();
+                    const lat = parseFloat(activity.getElementsByTagName('Latitude')[0]?.textContent);
+                    const lon = parseFloat(activity.getElementsByTagName('Longitude')[0]?.textContent);
+
+                    // Extract route from trip_id for real-time data as well
+                    const match = tripId.match(/trp_([A-Za-z0-9]+)_/);
+
+                    rtMap.set(tripId, {
+                        tripId: tripId,
+                        routeId: match ? match[1] : null,
+                        recordedAtTime: new Date(recordedAtISO),
+                        recordedAtISO: recordedAtISO,
+                        stopPointRef: stopPointRefElement.textContent.trim(), // Parada a la que se dirige
+                        lat: isNaN(lat) ? null : lat,
+                        lon: isNaN(lon) ? null : lon
+                    });
                 }
+                bizkaibusRealTimeData = Array.from(rtMap.values()); // Reemplaza los datos anteriores
                 // Trigger re-display to update with real-time data
                 displayNextArrivalsAndCorrespondence(true, silent);
             } catch (error) {
@@ -967,7 +1082,7 @@
                      timeDifference += 24 * 60;
                 }
 
-                if (timeDifference >= -5) {
+                if (timeDifference >= -15) { // un bus con retraso puede tener horario ya pasado
                     const trip = bizkaibusTripsData.find(t => t.trip_id === stopTime.trip_id);
                     if (trip) {
                         const busHeadsign = stopTime.stop_headsign || trip.trip_headsign || 'Desconocido';
@@ -1007,68 +1122,22 @@
             });
             // LOG: Filtered Bizkaibus Departures (after line/headsign filter) - This is the correct list for correspondence
             console.log('LOG: Filtered Bizkaibus Departures for correspondence:', filteredBizkaibusDepartures);
-            // Precalcular delayMinutes y hora estimada para cada bus
+            // Estimar el retraso y la hora de salida de cada bus (misma lógica que la página de Bizkaibus):
+            // se calcula entre qué dos paradas va el bus y, con su posición GPS, cuánto va de retraso.
+            const nowForEstimate = new Date();
+            const currentSecondsOfDay = nowForEstimate.getHours() * 3600 + nowForEstimate.getMinutes() * 60 + nowForEstimate.getSeconds();
             filteredBizkaibusDepartures.forEach(bus => {
-                const realTimeBus = bizkaibusRealTimeData.find(rt =>
-                    rt.tripId === bus.tripId && rt.routeId === bus.routeId
-                );
+                const scheduledMinutes = convertTimeToMinutes(bus.departureTime);
+                bus.estimatedDepartureMinutes = scheduledMinutes; // por defecto, la hora teórica
 
-                if (realTimeBus) {
-                    const theoreticalStopTimeEntry = bizkaibusStopTimesData.find(st =>
-                        st.trip_id === realTimeBus.tripId && st.stop_id === realTimeBus.stopPointRef
-                    );
+                const realTimeBus = bizkaibusRealTimeData.find(rt => rt.tripId === bus.tripId);
+                if (!realTimeBus) return;
 
-                    if (theoreticalStopTimeEntry) {
-                        const stopsForTrip = bizkaibusStopTimesData.filter(st => st.trip_id === realTimeBus.tripId);
+                const delaySeconds = estimateTripDelaySeconds(bus.tripId, realTimeBus, currentSecondsOfDay);
+                if (delaySeconds === null) return;
 
-                        // Buscar la primera parada (stop_sequence === '1')
-                        const originStop = stopsForTrip.find(st => st.stop_sequence === '1');
-
-                        if (originStop) {
-                            const originTimeStr = originStop.departure_time;
-                            const [h, m, s] = originTimeStr.split(':').map(Number);
-                            const originTime = new Date(realTimeBus.recordedAtTime);
-                            
-                            if (h >= 24) {
-                                originTime.setDate(originTime.getDate() + 1);
-                            }
-                            originTime.setHours(h % 24, m, s || 0, 0);
-
-                            const now = realTimeBus.recordedAtTime;
-                            const diffMinutes = (now - originTime) / 60000;
-
-                            // Solo calculamos delay si ya ha salido de la parada de origen
-                            if (diffMinutes >= 0) {
-                                const theoreticalTimeStr = theoreticalStopTimeEntry.departure_time;
-                                const theoreticalDate = new Date(now);
-                                let [ht, mt, st_] = theoreticalTimeStr.split(':').map(Number);
-                                if (ht >= 24) {
-                                    theoreticalDate.setDate(theoreticalDate.getDate() + 1);
-                                }
-                                theoreticalDate.setHours(ht % 24, mt, st_ || 0, 0);
-
-                                let delayMinutes = (now - theoreticalDate) / 60000;
-
-                                if (delayMinutes > 720) delayMinutes -= 1440;
-                                if (delayMinutes < -720) delayMinutes += 1440;
-
-                                bus.delayMinutes = delayMinutes;
-
-                                const baseMinutes = convertTimeToMinutes(bus.departureTime.split(':').slice(0, 2).join(':'));
-                                bus.estimatedDepartureMinutes = baseMinutes + delayMinutes;
-                            } else {
-                                // Aún no ha salido del origen, mostrar en hora
-                                bus.delayMinutes = 0;
-                                const baseMinutes = convertTimeToMinutes(bus.departureTime.split(':').slice(0, 2).join(':'));
-                                bus.estimatedDepartureMinutes = baseMinutes;
-                            }
-                        }
-                    }
-                } else {
-                    // Si no hay tiempo real, usar hora teórica como estimada
-                    const baseMinutes = convertTimeToMinutes(bus.departureTime.split(':').slice(0, 2).join(':'));
-                    bus.estimatedDepartureMinutes = baseMinutes;
-                }
+                bus.delayMinutes = delaySeconds / 60;
+                bus.estimatedDepartureMinutes = scheduledMinutes + delaySeconds / 60;
             });
 
             // Ordenar salidas por hora teórica (sin importar cuántos destinos haya)
@@ -1078,12 +1147,7 @@
 
             // Eliminar buses que ya han salido (con adelanto incluido)
             filteredBizkaibusDepartures = filteredBizkaibusDepartures.filter(bus => {
-                const cleanTime = bus.departureTime.split(':').slice(0, 2).join(':');
-                let estimatedMinutes = convertTimeToMinutes(cleanTime);
-                if (bus.delayMinutes !== undefined) {
-                    estimatedMinutes += bus.delayMinutes;
-                }
-                return estimatedMinutes >= currentTimeInMinutes - 0.5;
+                return bus.estimatedDepartureMinutes >= currentTimeInMinutes - 0.5;
             });
 
             // --- Display Metro Bilbao results with correspondence ---
@@ -1103,11 +1167,7 @@
                         let correspondenceMessage = '';
                         // NOW USE filteredBizkaibusDepartures for the correspondence check
                         const hasCorrespondence = !(train.transfer && train.transfer.pending) && filteredBizkaibusDepartures.some(bus => {
-                            const cleanBusTime = bus.departureTime.split(':').slice(0, 2).join(':');
-                            let estimatedBusTime = convertTimeToMinutes(cleanBusTime);
-                            if (typeof bus.delayMinutes === 'number') {
-                                estimatedBusTime += bus.delayMinutes;
-                            }
+                            const estimatedBusTime = bus.estimatedDepartureMinutes;
 
                             // ❌ Si el tren llega después del bus estimado, no hay enlace
                             if (train.arrivalTimeAtDestinationMinutes > estimatedBusTime) {
@@ -1200,33 +1260,40 @@
 
                     let realTimeStatus = '';
                     if (typeof bus.delayMinutes === 'number') {
-                        if (Math.abs(bus.delayMinutes) <= 2.5) {
-                            realTimeStatus = `<span class="bus-status-ontime">En hora</span>`;
-                        } else if (bus.delayMinutes > 2.5) {
-                            realTimeStatus = `<span class="bus-status-late">Retrasado por ${Math.round(bus.delayMinutes)} min.</span>`;
+                        const dm = Math.round(bus.delayMinutes);
+                        if (dm > 1) {
+                            realTimeStatus = `<span class="bus-status-late">Retrasado por ${dm} min.</span>`;
+                        } else if (dm < -1) {
+                            realTimeStatus = `<span class="bus-status-early">Adelantado por ${Math.abs(dm)} min.</span>`;
                         } else {
-                            realTimeStatus = `<span class="bus-status-early">Adelantado por ${Math.round(Math.abs(bus.delayMinutes))} min.</span>`;
+                            realTimeStatus = `<span class="bus-status-ontime">En hora</span>`;
                         }
                     } else {
                         realTimeStatus = `<span class="bus-status-unknown">Sin datos en tiempo real (teórico)</span>`;
                     }
-                    const realTimeBus = bizkaibusRealTimeData.find(rt => rt.tripId === bus.tripId && rt.routeId === bus.routeId);
 
-                    // Calcular la hora estimada para mostrar
-                    const baseMinutes = convertTimeToMinutes(bus.departureTime.split(':').slice(0, 2).join(':'));
-                    const estimatedMinutes = bus.delayMinutes !== undefined ? baseMinutes + bus.delayMinutes : baseMinutes;
-                    const estimatedTimeHHMM = formatMinutesToHHMM(estimatedMinutes);
+                    // Hora estimada para mostrar
+                    const estimatedMinutes = bus.estimatedDepartureMinutes;
+                    const estimatedTimeHHMM = formatEstimatedTime(estimatedMinutes);
 
                     // Calcular tiempo hasta salida
                     const timeToDeparture = estimatedMinutes - nowInMinutes;
+
+                    // Con el bus localizado en tiempo real, la hora estimada manda y la teórica pasa a segundo plano
+                    const scheduledHHMM = bus.departureTime.split(':').slice(0, 2).join(':');
+                    const isLocated = typeof bus.delayMinutes === 'number';
+                    const timeRows = isLocated
+                        ? `<div class="card-row card-row-secondary"><span>Salida teórica</span><b>${scheduledHHMM}</b></div>
+                        <div class="card-row"><span>Hora estimada (en ${formatTime(timeToDeparture)})</span><b>${estimatedTimeHHMM}</b></div>`
+                        : `<div class="card-row"><span>Salida teórica (en ${formatTime(timeToDeparture)})</span><b>${scheduledHHMM}</b></div>
+                        <div class="card-row"><span>Hora estimada</span><b>${estimatedTimeHHMM}</b></div>`;
 
                     busInfoDiv.innerHTML = `
                         <div class="card-head">
                             <span class="badge badge-bus">${bus.routeId}</span>
                             <strong>hacia ${bus.headsign}</strong>
                         </div>
-                        <div class="card-row"><span>Salida teórica (en ${formatTime(timeToDeparture)})</span><b>${bus.departureTime.split(':').slice(0, 2).join(':')}</b></div>
-                        <div class="card-row"><span>Hora estimada</span><b>${estimatedTimeHHMM}</b></div>
+                        ${timeRows}
                         <div class="card-row"><span>Estado</span>${realTimeStatus}</div>
                     `;
 
