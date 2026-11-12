@@ -477,10 +477,10 @@
         // Si los datos de RIX llevan sin actualizarse más de estos días, se usan los de GitHub.
         const MAX_DATA_AGE_DAYS = 30;
 
-        // Los horarios (stop_times) vienen repartidos en varios ficheros numerados: stop_times1.txt,
-        // stop_times2.txt, stop_times3.txt... Se descargan todos los que existan (hasta este máximo)
-        // y se juntan, así la parada se encuentra esté en el fichero que esté.
-        const MAX_STOP_TIMES_FILES = 4;
+        // Los horarios (stop_times) vienen repartidos en cuatro ficheros numerados: stop_times1.txt ...
+        // stop_times4.txt (no se usa el stop_times.txt original). Los cuatro son obligatorios: si falla
+        // alguno se considera que la fuente no sirve y se pasa al respaldo, en vez de seguir con datos a medias.
+        const STOP_TIMES_FILES = [1, 2, 3, 4];
 
         // Fuente principal: RIX
         const RIX_URLS = {
@@ -514,26 +514,30 @@
             });
         }
 
-        // Descarga un fichero opcional: devuelve null si no existe (404), falla o no es un CSV válido
-        async function fetchOptionalText(url) {
-            try {
-                const r = await fetch(url, { cache: 'no-cache' });
-                if (!r.ok) return null;
-                const t = await r.text();
-                if (!t.trim() || t.trim().startsWith('<')) return null;
-                return { response: r, text: t };
-            } catch (e) {
-                return null;
+        // Descarga un fichero obligatorio, con reintentos. Lanza error si no se consigue.
+        async function fetchRequiredText(url, retries = 2) {
+            let lastError;
+            for (let attempt = 0; attempt <= retries; attempt++) {
+                try {
+                    const r = await fetch(url, { cache: 'no-cache' });
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const t = await r.text();
+                    if (!t.trim() || t.trim().startsWith('<')) throw new Error('contenido no válido');
+                    return { response: r, text: t };
+                } catch (e) {
+                    lastError = e;
+                }
             }
+            throw new Error(`No se pudo descargar ${url}: ${lastError.message}`);
         }
 
         // Descarga los ficheros de un origen (todos los stop_times que existan + calendar, calendar_dates, trips
         // y stops). Devuelve los datos y la antigüedad (días) según la cabecera Last-Modified (null si no la envía).
         async function fetchDataSet(urls) {
             const keys = ['calendar', 'calendarDates', 'trips', 'stops'];
-            const [fixedResponses, stopTimesParts] = await Promise.all([
+            const [fixedResponses, stopTimesFound] = await Promise.all([
                 Promise.all(keys.map(k => fetch(urls[k], { cache: 'no-cache' }))),
-                Promise.all(Array.from({ length: MAX_STOP_TIMES_FILES }, (_, i) => fetchOptionalText(urls.stopTimes(i + 1))))
+                Promise.all(STOP_TIMES_FILES.map(n => fetchRequiredText(urls.stopTimes(n))))
             ]);
 
             fixedResponses.forEach(r => {
@@ -548,11 +552,7 @@
                 }
             });
 
-            const stopTimesFound = stopTimesParts.filter(Boolean);
-            if (stopTimesFound.length === 0) {
-                throw new Error('No se encontró ningún fichero stop_times');
-            }
-            console.log(`Ficheros stop_times encontrados: ${stopTimesFound.map(p => p.response.url.split('/').pop()).join(', ')}`);
+            console.log(`Ficheros stop_times cargados: ${stopTimesFound.map(p => p.response.url.split('/').pop()).join(', ')}`);
 
             // Antigüedad de cada fichero según Last-Modified (null si el servidor no la envía)
             const allResponses = [...fixedResponses, ...stopTimesFound.map(p => p.response)];
@@ -621,8 +621,8 @@
                     applyBizkaibusData(rix.data);
                     source = 'RIX';
                     setDataSourceInfo(
-                        rix.ageDays !== null
-                            ? `Datos teóricos: RIX (actualizados hace ${Math.floor(rix.ageDays)} días)`
+                        rix.newestAgeDays !== null
+                            ? `Datos teóricos: RIX (actualizados hace ${Math.floor(rix.newestAgeDays)} días)`
                             : 'Datos teóricos: RIX',
                         false
                     );
