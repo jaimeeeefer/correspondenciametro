@@ -538,17 +538,16 @@
                 }
             });
 
-            let oldestAgeDays = null;
-            responses.forEach(r => {
+            // Antigüedad de cada fichero según Last-Modified (null si el servidor no la envía)
+            const ages = responses.map(r => {
                 const lm = r.headers.get('Last-Modified');
-                if (lm) {
-                    const ts = new Date(lm).getTime();
-                    if (!isNaN(ts)) {
-                        const age = (Date.now() - ts) / 86400000;
-                        if (oldestAgeDays === null || age > oldestAgeDays) oldestAgeDays = age;
-                    }
-                }
+                const ts = lm ? new Date(lm).getTime() : NaN;
+                return isNaN(ts) ? null : (Date.now() - ts) / 86400000;
             });
+            const known = ages.filter(a => a !== null);
+
+            const oldestAgeDays = known.length ? Math.max(...known) : null; // el más antiguo (criterio de los 30 días)
+            const newestAgeDays = known.length ? Math.min(...known) : null; // el más reciente (el que se muestra)
 
             const data = {
                 stopTimes: parseCSV(texts[0]),
@@ -557,7 +556,7 @@
                 trips: parseCSV(texts[3]),
                 stops: parseCSV(texts[4])
             };
-            return { data, ageDays: oldestAgeDays };
+            return { data, ageDays: oldestAgeDays, newestAgeDays };
         }
 
         // ¿El calendario ya no cubre la fecha de hoy? (end_date máxima anterior a hoy)
@@ -599,6 +598,19 @@
             });
         }
 
+        // "hoy", "hace 1 día", "hace 3 días"
+        function formatDataAge(days) {
+            const d = Math.floor(days);
+            return d <= 0 ? 'hoy' : d === 1 ? 'hace 1 día' : `hace ${d} días`;
+        }
+
+        // Se muestra la antigüedad del fichero más reciente de RIX
+        function describeRixAge(rix) {
+            return rix.newestAgeDays === null
+                ? 'Datos teóricos: RIX'
+                : `Datos teóricos: RIX (actualizados ${formatDataAge(rix.newestAgeDays)})`;
+        }
+
         function setDataSourceInfo(text, warn) {
             const el = document.getElementById('dataSourceInfo');
             if (!el) return;
@@ -628,12 +640,7 @@
                 if (!rixProblem) {
                     applyBizkaibusData(rix.data);
                     source = 'RIX';
-                    setDataSourceInfo(
-                        rix.ageDays !== null
-                            ? `Datos teóricos: RIX (actualizados hace ${Math.floor(rix.ageDays)} días)`
-                            : 'Datos teóricos: RIX',
-                        false
-                    );
+                    setDataSourceInfo(describeRixAge(rix), false);
                 } else {
                     // 2) Respaldo: GitHub
                     console.warn(`Usando GitHub como respaldo (RIX: ${rixProblem})`);
