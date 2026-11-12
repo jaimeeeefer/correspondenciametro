@@ -1034,12 +1034,6 @@
             });
             // LOG: Filtered Bizkaibus Departures (after line/headsign filter) - This is the correct list for correspondence
             console.log('LOG: Filtered Bizkaibus Departures for correspondence:', filteredBizkaibusDepartures);
-            console.log('DBG filas en parada:', stopTimesAtBizkaibusStation.length,
-            [...new Set(stopTimesAtBizkaibusStation.map(s => (s.trip_id.match(/trp_([A-Za-z0-9]+)_/)||[])[1]))]);
-            console.log('DBG servicios activos hoy:', [...activeServiceIdsBizkaibus]);
-            console.log('DBG tras calendario:', filteredBizkaibusStopTimes.length);
-            console.log('DBG departures sin filtrar:', bizkaibusDepartures.length,
-            bizkaibusDepartures.slice(0, 5).map(b => ({ r: b.routeId, h: b.headsign, min: b.timeToDeparture })));
             // Precalcular delayMinutes y hora estimada para cada bus
             filteredBizkaibusDepartures.forEach(bus => {
                 const realTimeBus = bizkaibusRealTimeData.find(rt =>
